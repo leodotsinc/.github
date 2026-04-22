@@ -1,4 +1,4 @@
-name: Deploy
+name: Reusable Deploy
 
 on:
   workflow_call:
@@ -30,8 +30,8 @@ jobs:
       - run: docker build -t ghcr.io/${{ github.repository }}:latest .
       - run: docker push ghcr.io/${{ github.repository }}:latest
 
-  deploy:
-    name: Deploy
+  deploy-to-production:
+    name: Deploy to Production
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
