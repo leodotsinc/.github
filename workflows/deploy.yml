@@ -1,0 +1,67 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      app_dir:
+        required: true
+        type: string
+      service_name:
+        required: true
+        type: string
+      container_name:
+        required: true
+        type: string
+
+jobs:
+  build-and-push:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: docker build -t ghcr.io/${{ github.repository }}:latest .
+      - run: docker push ghcr.io/${{ github.repository }}:latest
+
+  deploy:
+    name: Deploy
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.VPS_IP }} >> ~/.ssh/known_hosts
+
+      - name: Deploy via SSH
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} << 'ENDSSH'
+            set -e
+            cd /home/leo/apps/${{ inputs.app_dir }}
+            docker compose pull ${{ inputs.service_name }}
+            docker stop ${{ inputs.container_name }} 2>/dev/null || true
+            docker rm -f ${{ inputs.container_name }} 2>/dev/null || true
+            docker compose up -d ${{ inputs.service_name }}
+            docker image prune -af --filter "until=24h"
+          ENDSSH
+
+      - name: Health check
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} "
+            sleep 5
+            if docker ps | grep -q ${{ inputs.container_name }}; then
+              docker ps | grep ${{ inputs.container_name }}
+            else
+              docker logs ${{ inputs.container_name }} --tail 50
+              exit 1
+            fi
+          "
