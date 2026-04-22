@@ -1,4 +1,4 @@
-name: CI
+name: Reusable CI
 
 on:
   workflow_call:
@@ -11,6 +11,14 @@ on:
         required: false
         type: string
         default: "yarn"
+      pre_build_command:
+        required: false
+        type: string
+        default: ""
+      dockerfile:
+        required: false
+        type: string
+        default: "Dockerfile"
 
 jobs:
   build:
@@ -22,12 +30,14 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager }}
-      - run: yarn install --frozen-lockfile
-      - run: yarn build
+      - run: ${{ inputs.package_manager == 'yarn' && 'yarn install --frozen-lockfile' || 'npm ci' }}
+      - run: ${{ inputs.pre_build_command }}
+        if: ${{ inputs.pre_build_command != '' }}
+      - run: ${{ inputs.package_manager == 'yarn' && 'yarn build' || 'npm run build' }}
 
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - run: docker build -t ${{ github.event.repository.name }}:ci .
+      - run: docker build -t ${{ github.event.repository.name }}:ci -f ${{ inputs.dockerfile }} .
