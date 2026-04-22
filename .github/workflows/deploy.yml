@@ -12,6 +12,10 @@ on:
       container_name:
         required: true
         type: string
+      dockerfile:
+        required: false
+        type: string
+        default: "Dockerfile"
 
 jobs:
   build-and-push:
@@ -27,7 +31,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: docker build -t ghcr.io/${{ github.repository }}:latest .
+      - run: docker build -t ghcr.io/${{ github.repository }}:latest -f ${{ inputs.dockerfile }} .
       - run: docker push ghcr.io/${{ github.repository }}:latest
 
   deploy-to-production:
