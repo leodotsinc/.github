@@ -11,10 +11,18 @@ on:
         required: false
         type: string
         default: "yarn"
+      install_command:
+        required: false
+        type: string
+        default: "yarn install --frozen-lockfile"
       pre_build_command:
         required: false
         type: string
         default: ""
+      build_command:
+        required: false
+        type: string
+        default: "yarn build"
       dockerfile:
         required: false
         type: string
@@ -30,10 +38,10 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           cache: ${{ inputs.package_manager }}
-      - run: ${{ inputs.package_manager == 'yarn' && 'yarn install --frozen-lockfile' || 'npm ci' }}
+      - run: ${{ inputs.install_command }}
       - run: ${{ inputs.pre_build_command }}
         if: ${{ inputs.pre_build_command != '' }}
-      - run: ${{ inputs.package_manager == 'yarn' && 'yarn build' || 'npm run build' }}
+      - run: ${{ inputs.build_command }}
 
   docker:
     name: Docker Build
