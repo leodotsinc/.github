@@ -16,10 +16,6 @@ on:
         required: false
         type: string
         default: "Dockerfile"
-      compose_file:
-        required: false
-        type: string
-        default: ""
 
 jobs:
   build-and-push:
@@ -43,21 +39,12 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.VPS_IP }} >> ~/.ssh/known_hosts
-
-      - name: Copy compose file to VPS
-        if: ${{ inputs.compose_file != '' }}
-        run: |
-          scp -i ~/.ssh/id_ed25519 -P ${{ secrets.SSH_PORT }} \
-            ${{ inputs.compose_file }} \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }}:/home/leo/apps/${{ inputs.app_dir }}/docker-compose.yml
 
       - name: Deploy via SSH
         run: |
