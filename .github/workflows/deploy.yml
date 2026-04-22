@@ -47,9 +47,15 @@ jobs:
           ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.VPS_IP }} >> ~/.ssh/known_hosts
 
       - name: Deploy via SSH
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} << 'ENDSSH'
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} \
+            GHCR_TOKEN="$GHCR_TOKEN" GHCR_USER="$GHCR_USER" \
+            bash << 'ENDSSH'
             set -e
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             cd /home/leo/apps/${{ inputs.app_dir }}
             docker compose pull ${{ inputs.service_name }}
             docker stop ${{ inputs.container_name }} 2>/dev/null || true
