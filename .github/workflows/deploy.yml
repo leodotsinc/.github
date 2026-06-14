@@ -57,10 +57,25 @@ jobs:
             set -e
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             cd /home/leo/apps/${{ inputs.app_dir }}
-            docker compose pull ${{ inputs.service_name }}
-            docker stop ${{ inputs.container_name }} 2>/dev/null || true
-            docker rm -f ${{ inputs.container_name }} 2>/dev/null || true
-            docker compose up -d ${{ inputs.service_name }}
+
+            # Pull with retry for transient GHCR auth issues
+            for i in 1 2 3; do
+              docker compose pull ${{ inputs.service_name }} && break
+              echo "Pull attempt $i failed, retrying in 5s..."
+              sleep 5
+            done
+
+            # --force-recreate avoids container name race conditions
+            docker compose up -d --force-recreate ${{ inputs.service_name }}
+
+            # Verify container actually started
+            sleep 3
+            if ! docker ps --format '{{.Names}}' | grep -q "^${{ inputs.container_name }}$"; then
+              echo "WARN: Container not running after compose up, attempting recovery..."
+              docker compose down ${{ inputs.service_name }}
+              docker compose up -d --force-recreate ${{ inputs.service_name }}
+            fi
+
             docker image prune -af --filter "until=24h"
           ENDSSH
 
