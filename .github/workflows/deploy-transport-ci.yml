@@ -1,0 +1,21 @@
+name: Deploy transport CI
+
+on:
+  push:
+    paths:
+      - "actions/cloudbox-deploy/**"
+      - ".github/workflows/deploy-transport-ci.yml"
+  pull_request:
+    paths:
+      - "actions/cloudbox-deploy/**"
+      - ".github/workflows/deploy-transport-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - run: python3 -m unittest actions/cloudbox-deploy/test_send.py

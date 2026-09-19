@@ -1,0 +1,46 @@
+name: Cloudbox deploy transport
+description: Sends an allowlisted release manifest to a forced-command deploy key.
+inputs:
+  app-id:
+    description: Server-side allowlisted application id.
+    required: true
+  release-file:
+    description: Path to the immutable release manifest.
+    required: true
+  vps-host:
+    description: Cloudbox SSH host.
+    required: true
+  ssh-port:
+    description: Cloudbox SSH port.
+    required: true
+  deploy-user:
+    description: Cloudbox SSH user.
+    required: true
+  deploy-key:
+    description: Private key paired with the app-specific forced command.
+    required: true
+  known-hosts:
+    description: Pinned SSH known_hosts entry for cloudbox.
+    required: true
+  registry-token:
+    description: Short-lived token with read access to the release image.
+    required: true
+  result-file:
+    description: Path to the sanitized deployment result.
+    required: false
+    default: deployment-result.json
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        CLOUDBOX_APP_ID: ${{ inputs.app-id }}
+        CLOUDBOX_RELEASE_FILE: ${{ inputs.release-file }}
+        CLOUDBOX_VPS_HOST: ${{ inputs.vps-host }}
+        CLOUDBOX_SSH_PORT: ${{ inputs.ssh-port }}
+        CLOUDBOX_DEPLOY_USER: ${{ inputs.deploy-user }}
+        CLOUDBOX_DEPLOY_KEY: ${{ inputs.deploy-key }}
+        CLOUDBOX_KNOWN_HOSTS: ${{ inputs.known-hosts }}
+        CLOUDBOX_REGISTRY_TOKEN: ${{ inputs.registry-token }}
+        CLOUDBOX_RESULT_FILE: ${{ inputs.result-file }}
+      run: python3 "$GITHUB_ACTION_PATH/send.py"
