@@ -25,6 +25,9 @@ inputs:
   registry-token:
     description: Short-lived token with read access to the release image.
     required: true
+  registry-username:
+    description: Registry account paired with the short-lived token.
+    required: true
   result-file:
     description: Path to the sanitized deployment result.
     required: false
@@ -42,5 +45,6 @@ runs:
         CLOUDBOX_DEPLOY_KEY: ${{ inputs.deploy-key }}
         CLOUDBOX_KNOWN_HOSTS: ${{ inputs.known-hosts }}
         CLOUDBOX_REGISTRY_TOKEN: ${{ inputs.registry-token }}
+        CLOUDBOX_REGISTRY_USERNAME: ${{ inputs.registry-username }}
         CLOUDBOX_RESULT_FILE: ${{ inputs.result-file }}
       run: python3 "$GITHUB_ACTION_PATH/send.py"

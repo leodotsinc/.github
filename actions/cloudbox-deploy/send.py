@@ -51,6 +51,7 @@ def main() -> None:
         "schema_version": 1,
         "app": app,
         "action": "deploy",
+        "registry_username": required("CLOUDBOX_REGISTRY_USERNAME"),
         "release": release,
     }
     payload = token.encode() + b"\n" + json.dumps(

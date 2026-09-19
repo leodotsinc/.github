@@ -37,6 +37,7 @@ class TransportTests(unittest.TestCase):
                 "CLOUDBOX_DEPLOY_KEY": "PRIVATE",
                 "CLOUDBOX_KNOWN_HOSTS": "HOSTKEY",
                 "CLOUDBOX_REGISTRY_TOKEN": "TOKEN_VALUE",
+                "CLOUDBOX_REGISTRY_USERNAME": "github-actions[bot]",
                 "CLOUDBOX_RESULT_FILE": str(result),
             }
             with mock.patch.dict(send.os.environ, env, clear=True):
