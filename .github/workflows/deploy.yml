@@ -25,6 +25,10 @@ on:
       deploy_user:
         required: true
         type: string
+      release_sha:
+        description: Source commit that must still be the caller repository main.
+        required: true
+        type: string
     secrets:
       deploy_key:
         required: true
@@ -42,6 +46,15 @@ jobs:
       group: cloudbox-${{ inputs.app_id }}-production
       cancel-in-progress: false
     steps:
+      - name: Require release source to remain current main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ inputs.release_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)" == "$RELEASE_SHA" ]]
+
       - name: Download immutable release manifest
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
