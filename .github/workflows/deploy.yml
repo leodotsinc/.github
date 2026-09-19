@@ -1,92 +1,71 @@
-name: Reusable Deploy
+name: Cloudbox deploy
 
 on:
   workflow_call:
     inputs:
-      app_dir:
+      app_id:
+        description: Server-side allowlisted application id.
         required: true
         type: string
-      service_name:
+      release_artifact:
+        description: Artifact containing the immutable release manifest.
         required: true
         type: string
-      container_name:
-        required: true
-        type: string
-      dockerfile:
+      release_file:
+        description: Manifest filename inside the downloaded artifact.
         required: false
+        default: release.json
         type: string
-        default: "Dockerfile"
+      vps_host:
+        required: true
+        type: string
+      ssh_port:
+        required: true
+        type: string
+      deploy_user:
+        required: true
+        type: string
+    secrets:
+      deploy_key:
+        required: true
+      known_hosts:
+        required: true
+
+permissions:
+  contents: read
+  packages: read
 
 jobs:
-  build-and-push:
-    name: Build & Push
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+    concurrency:
+      group: cloudbox-${{ inputs.app_id }}-production
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
-      - uses: docker/login-action@v4
+      - name: Download immutable release manifest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - run: docker build -t ghcr.io/${{ github.repository }}:latest -f ${{ inputs.dockerfile }} .
-      - run: docker push ghcr.io/${{ github.repository }}:latest
+          name: ${{ inputs.release_artifact }}
+          path: release-artifact
 
-  deploy-to-production:
-    name: Deploy to Production
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    steps:
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.VPS_IP }} >> ~/.ssh/known_hosts
+      - name: Deploy through app-specific gateway
+        uses: leodotsinc/.github/actions/cloudbox-deploy@e86a0b148c83b02a8cecb365b6bd10e15e397a3d
+        with:
+          app-id: ${{ inputs.app_id }}
+          release-file: release-artifact/${{ inputs.release_file }}
+          vps-host: ${{ inputs.vps_host }}
+          ssh-port: ${{ inputs.ssh_port }}
+          deploy-user: ${{ inputs.deploy_user }}
+          deploy-key: ${{ secrets.deploy_key }}
+          known-hosts: ${{ secrets.known_hosts }}
+          registry-token: ${{ github.token }}
+          result-file: deployment-result.json
 
-      - name: Deploy via SSH
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GHCR_USER: ${{ github.actor }}
-        run: |
-          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} \
-            GHCR_TOKEN="$GHCR_TOKEN" GHCR_USER="$GHCR_USER" \
-            bash << 'ENDSSH'
-            set -e
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-            cd /home/leo/apps/${{ inputs.app_dir }}
-
-            # Pull with retry for transient GHCR auth issues
-            for i in 1 2 3; do
-              docker compose pull ${{ inputs.service_name }} && break
-              echo "Pull attempt $i failed, retrying in 5s..."
-              sleep 5
-            done
-
-            # --force-recreate avoids container name race conditions
-            docker compose up -d --force-recreate ${{ inputs.service_name }}
-
-            # Verify container actually started
-            sleep 3
-            if ! docker ps --format '{{.Names}}' | grep -q "^${{ inputs.container_name }}$"; then
-              echo "WARN: Container not running after compose up, attempting recovery..."
-              docker compose down ${{ inputs.service_name }}
-              docker compose up -d --force-recreate ${{ inputs.service_name }}
-            fi
-
-            docker image prune -af --filter "until=24h"
-          ENDSSH
-
-      - name: Health check
-        run: |
-          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SSH_PORT }} ${{ secrets.DEPLOY_USER }}@${{ secrets.VPS_IP }} "
-            sleep 5
-            if docker ps | grep -q ${{ inputs.container_name }}; then
-              docker ps | grep ${{ inputs.container_name }}
-            else
-              docker logs ${{ inputs.container_name }} --tail 50
-              exit 1
-            fi
-          "
+      - name: Upload sanitized deployment evidence
+        if: always() && hashFiles('deployment-result.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ inputs.app_id }}-deployment-result
+          path: deployment-result.json
+          if-no-files-found: error
+          retention-days: 30
