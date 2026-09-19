@@ -49,7 +49,7 @@ jobs:
           path: release-artifact
 
       - name: Deploy through app-specific gateway
-        uses: leodotsinc/.github/actions/cloudbox-deploy@e86a0b148c83b02a8cecb365b6bd10e15e397a3d
+        uses: leodotsinc/.github/actions/cloudbox-deploy@652dcec7da1e90b491a1d8f0fda708ed005769a2
         with:
           app-id: ${{ inputs.app_id }}
           release-file: release-artifact/${{ inputs.release_file }}
@@ -59,6 +59,7 @@ jobs:
           deploy-key: ${{ secrets.deploy_key }}
           known-hosts: ${{ secrets.known_hosts }}
           registry-token: ${{ github.token }}
+          registry-username: ${{ github.actor }}
           result-file: deployment-result.json
 
       - name: Upload sanitized deployment evidence
