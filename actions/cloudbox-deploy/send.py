@@ -96,7 +96,7 @@ def main() -> None:
         result = json.loads(stdout)
     except json.JSONDecodeError as error:
         raise SystemExit("deploy gateway did not return JSON") from error
-    if not isinstance(result, dict) or result.get("app") != app:
+    if not isinstance(result, dict) or ("app" in result and result["app"] != app):
         raise SystemExit("deploy gateway returned an invalid result")
     Path(required("CLOUDBOX_RESULT_FILE")).write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
