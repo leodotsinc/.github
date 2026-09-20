@@ -69,7 +69,7 @@ jobs:
           path: release-artifact
 
       - name: Deploy through app-specific gateway
-        uses: leodotsinc/.github/actions/cloudbox-deploy@1df89ad61558452f1be6cfbdac3dae24efaeacf5
+        uses: leodotsinc/.github/actions/cloudbox-deploy@5ae7f2d5ebc135ad35067ce9d6caff0400e8d91d
         with:
           app-id: ${{ inputs.app_id }}
           release-file: release-artifact/${{ inputs.release_file }}
