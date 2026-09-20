@@ -22,7 +22,7 @@ class TransportTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         self.manifest = {
-            "service": "pluggy-mcp", "git_sha": "b" * 40,
+            "service": "pluggy-mcp", "git_sha": "b" * 40, "release_version": "0.4.0",
             "image": "ghcr.io/leodots/pluggy-mcp@sha256:" + "a" * 64,
             "deployment": {"status": "built", "deployed_at": None,
                            "verified_at": None, "observed_image": None},
@@ -164,6 +164,15 @@ class TransportTests(unittest.TestCase):
             candidate = copy.deepcopy(self.success)
             candidate["release"]["deployment"]["verified_at"] = verified_at
             self.execute(candidate, expect_error="INVALID_GATEWAY_RESULT")
+
+    def test_reconciliation_receipt_preserves_only_validated_handshake_fields(self):
+        value = {**self.success, "catalog_reconciled": True,
+                 "server_info": {"name": "pluggy", "version": "0.4.0", "extra": "UNCONTROLLED"}}
+        self.execute(value)
+        self.assertEqual(self.evidence()["server_info"], {"name": "pluggy", "version": "0.4.0"})
+        self.assertTrue(self.evidence()["catalog_reconciled"])
+        for server in ({"name": "other", "version": "0.4.0"}, {"name": "pluggy", "version": "0.3.0"}):
+            self.execute({**value, "server_info": server}, expect_error="INVALID_GATEWAY_RESULT")
 
 
 if __name__ == "__main__":

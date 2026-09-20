@@ -87,6 +87,14 @@ def sanitized_result(stdout, app, release, token):
         if verified_at < deployed_at:
             raise ValueError("verification precedes deployment")
         result.update(status="verified", release=verified)
+        if "server_info" in value:
+            server = value["server_info"]
+            if (not isinstance(server, dict) or not isinstance(server.get("name"), str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", server["name"])
+                    or server.get("version") != release.get("release_version")
+                    or (app == "pluggy-mcp" and server["name"] != "pluggy")):
+                raise ValueError("server identity mismatch")
+            result["server_info"] = {"name": server["name"], "version": server["version"]}
     else:
         error = value.get("error")
         if error is None and value.get("status") == "needs_bootstrap":
@@ -96,7 +104,7 @@ def sanitized_result(stdout, app, release, token):
         result.update(status="failed", error=error)
     # These are public booleans produced by existing helpers. Unknown fields and
     # free-form reason/log strings never cross into uploaded evidence.
-    for key in ("already_verified", "offsite_capture_verified", "restore_verified"):
+    for key in ("already_verified", "offsite_capture_verified", "restore_verified", "catalog_reconciled"):
         if type(value.get(key)) is bool:
             result[key] = value[key]
     checkpoint = value.get("checkpoint")
