@@ -2,6 +2,10 @@ name: Cloudbox deploy
 
 on:
   workflow_call:
+    outputs:
+      result_artifact:
+        description: Sanitized deployment evidence for this run attempt.
+        value: ${{ jobs.deploy.outputs.result_artifact }}
     inputs:
       app_id:
         description: Server-side allowlisted application id.
@@ -42,6 +46,9 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    outputs:
+      result_artifact: ${{ inputs.app_id }}-deployment-result-${{ github.run_id }}-${{ github.run_attempt }}
     concurrency:
       group: cloudbox-${{ inputs.app_id }}-production
       cancel-in-progress: false
@@ -79,7 +86,7 @@ jobs:
         if: always() && hashFiles('deployment-result.json') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ inputs.app_id }}-deployment-result
+          name: ${{ inputs.app_id }}-deployment-result-${{ github.run_id }}-${{ github.run_attempt }}
           path: deployment-result.json
           if-no-files-found: error
           retention-days: 30

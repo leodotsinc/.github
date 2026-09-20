@@ -5,10 +5,12 @@ on:
     paths:
       - "actions/cloudbox-deploy/**"
       - ".github/workflows/deploy-transport-ci.yml"
+      - ".github/workflows/deploy.yml"
   pull_request:
     paths:
       - "actions/cloudbox-deploy/**"
       - ".github/workflows/deploy-transport-ci.yml"
+      - ".github/workflows/deploy.yml"
 
 permissions:
   contents: read
