@@ -160,10 +160,10 @@ jobs:
           client-id: ${{ inputs.app_client_id }}
           private-key: ${{ secrets.app_private_key }}
           owner: leodots
-          repositories: vps-bootstrap
+          repositories: cloudbox-infra
           permission-actions: write
 
-      - name: Request and wait for vps-bootstrap reconciliation
+      - name: Request and wait for cloudbox-infra reconciliation
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           RECEIPT_B64: ${{ steps.receipt.outputs.value }}
@@ -172,7 +172,7 @@ jobs:
           set -euo pipefail
           started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           python3 - <<'PY' | gh api \
-            repos/leodots/vps-bootstrap/actions/workflows/reconcile-deployment.yml/dispatches \
+            repos/leodots/cloudbox-infra/actions/workflows/reconcile-deployment.yml/dispatches \
             --method POST --input -
           import json
           import os
@@ -184,11 +184,11 @@ jobs:
           run_id=""
           for _ in $(seq 1 60); do
             run_id="$(gh api \
-              'repos/leodots/vps-bootstrap/actions/workflows/reconcile-deployment.yml/runs?event=workflow_dispatch&per_page=50' \
+              'repos/leodots/cloudbox-infra/actions/workflows/reconcile-deployment.yml/runs?event=workflow_dispatch&per_page=50' \
               --jq ".workflow_runs[] | select(.display_title == \"Reconcile $REQUEST_ID\" and .created_at >= \"$started\") | .id" \
               | head -n 1)"
             test -n "$run_id" && break
             sleep 2
           done
           test -n "$run_id"
-          gh run watch "$run_id" -R leodots/vps-bootstrap --exit-status
+          gh run watch "$run_id" -R leodots/cloudbox-infra --exit-status
