@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 
 def locked_components(manifest, lock):
-    if (manifest.get('private') is not True or manifest.get('scripts') or
+    if (manifest.get('private') is not True or manifest.get('scripts') or manifest.get('dependencies') or
             set(manifest.get('devDependencies', {})) != {'renovate'} or
             not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', manifest['devDependencies']['renovate']) or
             lock.get('lockfileVersion') != 3 or
