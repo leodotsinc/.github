@@ -1,9 +1,9 @@
 name: Maintenance contracts
 on:
   push:
-    paths: ['renovate/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
+    paths: ['renovate/**', 'package.json', 'package-lock.json', 'tools/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
   pull_request:
-    paths: ['renovate/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
+    paths: ['renovate/**', 'package.json', 'package-lock.json', 'tools/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,5 +22,39 @@ jobs:
         with:
           node-version: '24.14.1'
           package-manager-cache: false
-      - run: npx --yes --package=renovate@44.104.2 renovate-config-validator --strict renovate/maintenance.json
+      - name: Install exactly the locked validator, without dependency lifecycle scripts
+        run: |
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/maintenance-home" \
+            npm_config_cache="$RUNNER_TEMP/maintenance-npm-cache" \
+            npm ci --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
+      - name: Generate source inventory without network
+        run: |
+          mkdir -p maintenance-tool-evidence
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/maintenance-home" \
+            NODE_OPTIONS="--require=$PWD/tools/deny-network.cjs" \
+            npm sbom --package-lock-only --sbom-format=cyclonedx > maintenance-tool-evidence/raw.json
+          python3 tools/toolchain_inventory.py --input maintenance-tool-evidence/raw.json \
+            --output maintenance-tool-evidence/sbom.json
+      - name: Validate configuration without network or model credentials
+        run: |
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/maintenance-home" \
+            NODE_OPTIONS="--require=$PWD/tools/deny-network.cjs" \
+            node node_modules/renovate/dist/config-validator.js --strict renovate/maintenance.json
+      - name: Check official npm advisories for development and transitive packages
+        run: |
+          env -i PATH="$PATH" HOME="$RUNNER_TEMP/maintenance-home" \
+            npm_config_cache="$RUNNER_TEMP/maintenance-npm-cache" \
+            npm audit --package-lock-only --audit-level=high --json --registry=https://registry.npmjs.org \
+            > maintenance-tool-evidence/npm-audit.json
+      - run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+      - name: Retain exact-run source SBOM and advisory results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: maintenance-toolchain-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            maintenance-tool-evidence/sbom.json
+            maintenance-tool-evidence/npm-audit.json
+          if-no-files-found: error
+          retention-days: 7
       - run: python3 -m unittest discover -s actions/maintenance-scan -p 'test_*.py' -v

@@ -12,3 +12,27 @@ existing release callers retain their current protocol. The job token stays in
 the existing ephemeral stdin credential line and is never put in the context.
 
 This adoption belongs to [cloudbox-infra PR #11](https://github.com/leodots/cloudbox-infra/pull/11).
+
+### Locked maintenance validator
+
+`package.json` pins the existing Renovate validator; `package-lock.json` records
+its complete npm graph and integrity values. Mend's npm manager updates the
+manifest and lock together; the existing weekly lock maintenance also discovers
+transitive changes. These pull requests retain normal review and CI gates.
+Do not reintroduce a floating `npx` download or enable dependency lifecycle hooks.
+
+The hosted `Maintenance contracts` job installs with `npm ci --ignore-scripts`,
+validates the preset with network sockets blocked and no inherited credentials,
+and generates a CycloneDX source SBOM from the exact lock on every run. The SBOM
+is normalized and checked against all locked package hashes, then retained with
+official npm advisory results for seven days under the run/attempt identity.
+There is no separately committed SBOM requiring another bot or an AI-generated
+update. CI fails for high/critical npm advisories or unavailable advisory results.
+This does not replace image scans or qualify the deployment executor.
+
+To reproduce after a reviewed manifest edit, use Node 24.14.1 and run
+`npm install --package-lock-only --ignore-scripts --no-audit --no-fund`, then the
+same CI steps. A mismatch makes `npm ci` fail; CI never edits or commits the lock.
+The published Renovate package does not include optional native RE2: the validator
+warns that it uses JavaScript RegExp. This preserves the previous CLI limitation;
+validation of new custom regex managers requires explicit RE2 qualification.
