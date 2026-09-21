@@ -24,12 +24,15 @@ def evaluate(report, metadata, observed, expected):
     results = report.get('Results')
     if not isinstance(results, list) or not results or not any(r.get('Packages') for r in results):
         raise ValueError('PACKAGE_COVERAGE_UNKNOWN')
+    findings = []
     counts = {s: 0 for s in ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'UNKNOWN')}
     for result in results:
         for vulnerability in result.get('Vulnerabilities') or []:
+            findings.append({key: str(vulnerability.get(key, ''))[:500] for key in
+                             ('VulnerabilityID', 'PkgName', 'InstalledVersion', 'FixedVersion', 'Severity')})
             counts[vulnerability.get('Severity', 'UNKNOWN') if vulnerability.get('Severity') in counts else 'UNKNOWN'] += 1
     return {'schema_version': 1, 'image': expected, 'observed_at': observed.isoformat(),
-            'database_updated_at': updated.isoformat(), 'counts': counts,
+            'database_updated_at': updated.isoformat(), 'counts': counts, 'findings': findings,
             'status': 'blocked' if counts['CRITICAL'] or counts['HIGH'] or counts['UNKNOWN'] else 'passed',
             'packages': sum(len(r.get('Packages') or []) for r in results),
             'official_advisories_checked': False,
