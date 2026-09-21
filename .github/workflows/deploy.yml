@@ -21,7 +21,7 @@ on:
         default: release.json
         type: string
       maintenance_artifact:
-        description: Optional same-run Pluggy maintenance identity artifact.
+        description: Optional same-run Pluggy or Blog maintenance identity artifact.
         required: false
         default: ''
         type: string
@@ -81,8 +81,11 @@ jobs:
           ARTIFACT_FILE: ${{ inputs.maintenance_file }}
         run: |
           set -euo pipefail
-          test "$APP_ID" = pluggy-mcp
-          test "$ARTIFACT_NAME" = pluggy-maintenance-context
+          case "$APP_ID" in
+            pluggy-mcp) test "$ARTIFACT_NAME" = pluggy-maintenance-context ;;
+            blog) test "$ARTIFACT_NAME" = blog-maintenance-context ;;
+            *) exit 1 ;;
+          esac
           test "$ARTIFACT_FILE" = maintenance-context.json
 
       - name: Download same-run maintenance context
@@ -99,7 +102,7 @@ jobs:
           path: release-artifact
 
       - name: Deploy through app-specific gateway
-        uses: leodotsinc/.github/actions/cloudbox-deploy@5fdada8840e7274d63db818488b83817a4db4f91
+        uses: leodotsinc/.github/actions/cloudbox-deploy@dc8aa958a084f3c51b710b449be13542b1df1cb0
         with:
           app-id: ${{ inputs.app_id }}
           release-file: release-artifact/${{ inputs.release_file }}

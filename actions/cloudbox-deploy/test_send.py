@@ -247,3 +247,37 @@ class MaintenanceTransportTests(TransportTests):
             with self.assertRaises(ValueError): send.main()
         run.assert_not_called()
         self.assertFalse(self.result.exists())
+
+    def test_blog_keeps_real_baseline_producer_and_source_ci_identities(self):
+        context = copy.deepcopy(self.context)
+        context.update(app='blog', control_sha256='3'*64, producer_commit='f'*40, evidence_run_id=456)
+        context['source_pr']['base_sha'] = context['producer_commit']
+        context['base_manifest']['service'] = 'blog'
+        context['baseline_receipt_sha256'] = send.canonical_hash(context['base_manifest'])
+        context['request_id'] = send.canonical_hash({k:context[k] for k in
+            ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')})
+        release = {**self.manifest, 'service': 'blog'}
+        self.context_file.write_text(json.dumps(context))
+        self.assertEqual(send.load_maintenance(self.context_file, 'blog', release), context)
+        changes = [('control_sha256', None), ('control_sha256', 'not-a-hash'),
+                   ('evidence_run_id', True), ('evidence_run_id', 0),
+                   ('source_pr', {**context['source_pr'], 'base_sha': '0'*40}),
+                   ('base_manifest', {**context['base_manifest'], 'git_sha': 'invalid'}),
+                   ('authorized', True)]
+        for key, value in changes:
+            item = copy.deepcopy(context)
+            if value is None: item.pop(key)
+            else: item[key] = value
+            self.context_file.write_text(json.dumps(item))
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                send.load_maintenance(self.context_file, 'blog', release)
+
+    def test_blog_control_extension_cannot_relax_pluggy_or_other_apps(self):
+        for change in ({'control_sha256': '3'*64}, {'evidence_run_id': 456},
+                       {'producer_commit': 'f'*40, 'source_pr': {**self.context['source_pr'], 'base_sha': 'f'*40}}):
+            self.context_file.write_text(json.dumps({**self.context, **change}))
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                send.load_maintenance(self.context_file, 'pluggy-mcp', self.manifest)
+        self.context_file.write_text(json.dumps(self.context))
+        with self.assertRaises(ValueError):
+            send.load_maintenance(self.context_file, 'meeting-ai', self.manifest)
