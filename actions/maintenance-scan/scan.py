@@ -54,7 +54,7 @@ def main():
         if not re.fullmatch(r'(?:[a-z0-9][a-z0-9._/:-]*@)?sha256:[a-f0-9]{64}', args.image):
             raise ValueError('IMMUTABLE_IMAGE_REQUIRED')
         command = [args.trivy, 'image', '--config', str(config), '--cache-dir', str(args.cache),
-                   '--scanners', 'vuln', '--list-all-pkgs', '--ignorefile', '/dev/null',
+                   '--disable-telemetry', '--scanners', 'vuln', '--list-all-pkgs', '--ignorefile', '/dev/null',
                    '--ignore-unfixed=false', '--format', 'json', '--timeout', '5m',
                    '--output', str(report), args.image]
         subprocess.run(command, check=True, timeout=360, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
