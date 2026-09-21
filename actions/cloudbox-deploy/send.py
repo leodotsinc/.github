@@ -89,14 +89,17 @@ def load_maintenance(path, app, release):
         require(parsed.tzinfo is not None)
         return parsed
 
-    require(app == "pluggy-mcp" and path.is_file() and not path.is_symlink())
+    require(app in {"pluggy-mcp", "blog"} and path.is_file() and not path.is_symlink())
     with path.open("rb") as stream:
         raw = stream.read(MAX_MAINTENANCE + 1)
     require(len(raw) <= MAX_MAINTENANCE)
     def invalid_constant(_):
         raise ValueError("invalid maintenance context")
     value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
-    require(isinstance(value, dict) and set(value) == MAINTENANCE_KEYS)
+    expected_keys = MAINTENANCE_KEYS | ({"control_sha256"} if app == "blog" else set())
+    require(isinstance(value, dict) and set(value) == expected_keys)
+    if app == "blog":
+        require(sha(value["control_sha256"], 64))
     require(not contains_secret_field(value))
     require(type(value["schema_version"]) is int and value["schema_version"] == 1
             and value["app"] == app and value["mode"] == "monthly")
@@ -110,14 +113,20 @@ def load_maintenance(path, app, release):
     require(source["base_sha"] == value["producer_commit"] and source["head_sha"] == value["head_sha"]
             and source["tree_sha"] == value["tree_sha"])
     base = value["base_manifest"]
-    require(isinstance(base, dict) and base.get("service") == app and base.get("git_sha") == value["producer_commit"])
+    require(isinstance(base, dict) and base.get("service") == app and sha(base.get("git_sha")))
+    # Blog may have a separately pinned control configuration on the producer.
+    # The host proves its exact limited delta; transport must retain the real A/B.
+    if app == "pluggy-mcp":
+        require(base["git_sha"] == value["producer_commit"])
     require(isinstance(base.get("deployment"), dict) and base["deployment"].get("status") == "verified")
     require(canonical_hash(base) == value["baseline_receipt_sha256"])
     require(canonical_hash({"app": app, "baseline_receipt_sha256": value["baseline_receipt_sha256"],
                             "head_sha": value["head_sha"], "tree_sha": value["tree_sha"]}) == value["request_id"])
     require(release.get("service") == app and release.get("git_sha") == value["merged_sha"])
     require(type(value["release_run_id"]) is int and 0 < value["release_run_id"] <= 2**53 - 1
-            and type(value["evidence_run_id"]) is int and value["evidence_run_id"] == value["release_run_id"])
+            and type(value["evidence_run_id"]) is int and 0 < value["evidence_run_id"] <= 2**53 - 1)
+    if app == "pluggy-mcp":
+        require(value["evidence_run_id"] == value["release_run_id"])
     require(str(release.get("build", {}).get("id")) == str(value["release_run_id"]))
     window = value["window"]
     require(isinstance(window, dict) and set(window) == {"start", "end", "timezone"}
