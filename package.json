@@ -1,0 +1,13 @@
+{
+  "name": "cloudbox-shared-maintenance-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked development toolchain for shared maintenance contract validation.",
+  "engines": {
+    "node": "24.14.1"
+  },
+  "devDependencies": {
+    "renovate": "44.104.2"
+  },
+  "packageManager": "npm@11.11.0"
+}
