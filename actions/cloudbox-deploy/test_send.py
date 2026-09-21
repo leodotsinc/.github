@@ -177,3 +177,73 @@ class TransportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MaintenanceTransportTests(TransportTests):
+    def setUp(self):
+        super().setUp()
+        self.manifest['build'] = {'id': '1234', 'attempt': 1}
+        self.release.write_text(json.dumps(self.manifest))
+        self.success['release']['build'] = copy.deepcopy(self.manifest['build'])
+        base = copy.deepcopy(self.manifest)
+        base['git_sha'] = 'c'*40
+        base['deployment'] = copy.deepcopy(self.success['release']['deployment'])
+        self.context = {
+            'schema_version': 1, 'app': 'pluggy-mcp', 'mode': 'monthly',
+            'request_id': '', 'policy_sha256': '1'*64,
+            'baseline_receipt_sha256': send.canonical_hash(base),
+            'source_pr': {'number': 9, 'base_sha': 'c'*40, 'head_sha': 'd'*40, 'tree_sha': 'e'*40},
+            'head_sha': 'd'*40, 'merged_sha': 'b'*40, 'tree_sha': 'e'*40,
+            'delta_sha256': '2'*64, 'window': {'start': '2026-10-01T10:00:00-03:00',
+            'end': '2026-10-01T12:00:00-03:00', 'timezone': 'America/Sao_Paulo'},
+            'expires_at': '2026-10-01T10:59:00-03:00', 'base_manifest': base,
+            'producer_commit': 'c'*40, 'evidence_run_id': 1234, 'release_run_id': 1234,
+        }
+        self.context['request_id'] = send.canonical_hash({k:self.context[k] for k in
+            ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')})
+        self.context_file = self.root/'maintenance-context.json'
+        self.context_file.write_text(json.dumps(self.context))
+
+    def test_optional_context_is_stdin_only_and_matches_release(self):
+        self.env['CLOUDBOX_MAINTENANCE_FILE'] = str(self.context_file)
+        run = self.execute(self.success)
+        payload = run.call_args.kwargs['input']
+        envelope = json.loads(payload.split(b'\n', 2)[1])
+        self.assertEqual(envelope['maintenance'], self.context)
+        self.assertNotIn('TOKEN_VALUE', json.dumps(envelope))
+        self.assertNotIn('maintenance', self.evidence())
+
+    def test_absence_preserves_original_envelope(self):
+        run = self.execute(self.success)
+        self.assertNotIn('maintenance', json.loads(run.call_args.kwargs['input'].split(b'\n')[1]))
+
+    def test_refuses_unknown_fields_cross_identity_urgency_and_malformed_inputs_before_ssh(self):
+        changes = [
+            ('app', 'blog'), ('mode', 'urgent'), ('schema_version', True),
+            ('request_id', '9'*64), ('policy_sha256', 'not-a-hash'),
+            ('merged_sha', 'f'*40), ('head_sha', 'f'*40), ('producer_commit', 'f'*40),
+            ('evidence_run_id', 999), ('release_run_id', True), ('extra', True),
+            ('window', {'start':'2026-10-01T10:00:00', 'end':'2026-10-01T12:00:00', 'timezone':'America/Sao_Paulo'}),
+            ('expires_at', '2026-10-01T12:01:00-03:00'),
+            ('base_manifest', dict(self.context['base_manifest'], token='forbidden')),
+        ]
+        for key, value in changes:
+            with self.subTest(field=key):
+                item = copy.deepcopy(self.context);item[key] = value
+                self.context_file.write_text(json.dumps(item))
+                with self.assertRaises((ValueError, TypeError)):
+                    send.load_maintenance(self.context_file, 'pluggy-mcp', self.manifest)
+        self.context_file.write_text(json.dumps(self.context))
+        with self.assertRaises(ValueError): send.load_maintenance(self.context_file, 'blog', self.manifest)
+        for raw in ('{' + ' '*16384 + '}', '{"schema_version":1,"schema_version":1}', '{"x":NaN}'):
+            self.context_file.write_text(raw)
+            with self.assertRaises(ValueError): send.load_maintenance(self.context_file, 'pluggy-mcp', self.manifest)
+
+    def test_rejected_context_never_opens_transport(self):
+        self.context['mode'] = 'urgent'
+        self.context_file.write_text(json.dumps(self.context))
+        self.env['CLOUDBOX_MAINTENANCE_FILE'] = str(self.context_file)
+        with mock.patch.dict(send.os.environ, self.env, clear=True), mock.patch.object(send.subprocess, 'run') as run:
+            with self.assertRaises(ValueError): send.main()
+        run.assert_not_called()
+        self.assertFalse(self.result.exists())
