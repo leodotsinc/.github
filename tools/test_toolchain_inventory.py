@@ -58,7 +58,7 @@ class ToolchainTests(unittest.TestCase):
         workflow = (root / '.github/workflows/maintenance-check.yml').read_text()
         for expected in ('npm ci --ignore-scripts', 'npm sbom --package-lock-only', 'deny-network.cjs',
                          'npm audit --package-lock-only --audit-level=high', 'retention-days: 7',
-                         'timeout-minutes: 10', 'contents: read', 'env -i PATH='):
+                         'timeout-minutes: 10', 'contents: read', 'env -i PATH=', 'process.versions.node', '$(npm --version)'):
             self.assertIn(expected, workflow)
         self.assertNotIn('contents: write', workflow)
         self.assertNotIn('npx ', workflow)
