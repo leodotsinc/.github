@@ -8,6 +8,7 @@ stdin line. It is never added to argv, the release JSON, or a file.
 from __future__ import annotations
 
 from datetime import datetime
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -56,6 +57,72 @@ def load_release(path: Path) -> dict:
         raise SystemExit("release manifest must be a JSON object")
     if contains_secret_field(value):
         raise SystemExit("release manifest contains a forbidden secret field")
+    return value
+
+
+MAINTENANCE_KEYS = {
+    "schema_version", "app", "mode", "request_id", "policy_sha256",
+    "baseline_receipt_sha256", "source_pr", "head_sha", "merged_sha", "tree_sha",
+    "delta_sha256", "window", "expires_at", "base_manifest", "producer_commit",
+    "evidence_run_id", "release_run_id",
+}
+MAX_MAINTENANCE = 16384
+
+
+def canonical_hash(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                    ensure_ascii=True, allow_nan=False).encode()).hexdigest()
+
+
+def load_maintenance(path, app, release):
+    """Transport a closed identity envelope; only the protected host authorizes it."""
+    def require(condition):
+        if not condition:
+            raise ValueError("invalid maintenance context")
+
+    def sha(value, size=40):
+        return isinstance(value, str) and re.fullmatch("[0-9a-f]{%d}" % size, value)
+
+    def timestamp(value):
+        require(isinstance(value, str) and len(value) <= 40)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        require(parsed.tzinfo is not None)
+        return parsed
+
+    require(app == "pluggy-mcp" and path.is_file() and not path.is_symlink())
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_MAINTENANCE + 1)
+    require(len(raw) <= MAX_MAINTENANCE)
+    def invalid_constant(_):
+        raise ValueError("invalid maintenance context")
+    value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    require(isinstance(value, dict) and set(value) == MAINTENANCE_KEYS)
+    require(not contains_secret_field(value))
+    require(type(value["schema_version"]) is int and value["schema_version"] == 1
+            and value["app"] == app and value["mode"] == "monthly")
+    for key in ("request_id", "policy_sha256", "baseline_receipt_sha256", "delta_sha256"):
+        require(sha(value[key], 64))
+    for key in ("head_sha", "merged_sha", "tree_sha", "producer_commit"):
+        require(sha(value[key]))
+    source = value["source_pr"]
+    require(isinstance(source, dict) and set(source) == {"number", "base_sha", "head_sha", "tree_sha"})
+    require(type(source["number"]) is int and 0 < source["number"] <= 2**53 - 1)
+    require(source["base_sha"] == value["producer_commit"] and source["head_sha"] == value["head_sha"]
+            and source["tree_sha"] == value["tree_sha"])
+    base = value["base_manifest"]
+    require(isinstance(base, dict) and base.get("service") == app and base.get("git_sha") == value["producer_commit"])
+    require(isinstance(base.get("deployment"), dict) and base["deployment"].get("status") == "verified")
+    require(canonical_hash(base) == value["baseline_receipt_sha256"])
+    require(canonical_hash({"app": app, "baseline_receipt_sha256": value["baseline_receipt_sha256"],
+                            "head_sha": value["head_sha"], "tree_sha": value["tree_sha"]}) == value["request_id"])
+    require(release.get("service") == app and release.get("git_sha") == value["merged_sha"])
+    require(type(value["release_run_id"]) is int and 0 < value["release_run_id"] <= 2**53 - 1
+            and type(value["evidence_run_id"]) is int and value["evidence_run_id"] == value["release_run_id"])
+    require(str(release.get("build", {}).get("id")) == str(value["release_run_id"]))
+    window = value["window"]
+    require(isinstance(window, dict) and set(window) == {"start", "end", "timezone"}
+            and window["timezone"] == "America/Sao_Paulo")
+    require(timestamp(window["start"]) < timestamp(value["expires_at"]) <= timestamp(window["end"]))
     return value
 
 
@@ -150,6 +217,9 @@ def main() -> None:
         "registry_username": required("CLOUDBOX_REGISTRY_USERNAME"),
         "release": release,
     }
+    maintenance_file = os.environ.get("CLOUDBOX_MAINTENANCE_FILE", "")
+    if maintenance_file:
+        envelope["maintenance"] = load_maintenance(Path(maintenance_file), app, release)
     payload = token.encode() + b"\n" + json.dumps(
         envelope, separators=(",", ":"), sort_keys=True
     ).encode() + b"\n"

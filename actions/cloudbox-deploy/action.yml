@@ -7,6 +7,10 @@ inputs:
   release-file:
     description: Path to the immutable release manifest.
     required: true
+  maintenance-file:
+    description: Optional closed maintenance context; authorization remains on the host.
+    required: false
+    default: ""
   vps-host:
     description: Cloudbox SSH host.
     required: true
@@ -39,6 +43,7 @@ runs:
       env:
         CLOUDBOX_APP_ID: ${{ inputs.app-id }}
         CLOUDBOX_RELEASE_FILE: ${{ inputs.release-file }}
+        CLOUDBOX_MAINTENANCE_FILE: ${{ inputs.maintenance-file }}
         CLOUDBOX_VPS_HOST: ${{ inputs.vps-host }}
         CLOUDBOX_SSH_PORT: ${{ inputs.ssh-port }}
         CLOUDBOX_DEPLOY_USER: ${{ inputs.deploy-user }}
