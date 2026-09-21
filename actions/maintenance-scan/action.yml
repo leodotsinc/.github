@@ -1,15 +1,30 @@
-name: Qualified image security scan
-description: Scan one immutable image with a pinned Trivy and fresh database; fail closed without any model calls.
+name: Qualified image or source SBOM security scan
+description: Scan one immutable image or bounded source SBOM with a pinned Trivy and fresh database; fail closed without any model calls.
 inputs:
   image:
     description: Immutable digest reference or local image ID
-    required: true
+    required: false
+    default: ''
+  sbom:
+    description: Local CycloneDX 1.5 source SBOM (PyPI/npm only); mutually exclusive with image
+    required: false
+    default: ''
   output:
     description: Runner-local evidence directory
     required: true
 runs:
   using: composite
   steps:
+    - name: Require exactly one scan subject
+      shell: bash
+      env:
+        SCAN_IMAGE: ${{ inputs.image }}
+        SCAN_SBOM: ${{ inputs.sbom }}
+      run: |
+        if { test -n "$SCAN_IMAGE" && test -n "$SCAN_SBOM"; } || { test -z "$SCAN_IMAGE" && test -z "$SCAN_SBOM"; }; then
+          echo 'EXACTLY_ONE_SCAN_SUBJECT_REQUIRED' >&2
+          exit 1
+        fi
     - name: Download verified official Trivy
       shell: bash
       run: |
@@ -22,12 +37,15 @@ runs:
           "$tools_dir/trivy.tar.gz" | sha256sum --check --status
         tar -xzf "$tools_dir/trivy.tar.gz" -C "$tools_dir" trivy
         echo "CLOUDBOX_TRIVY=$tools_dir/trivy" >> "$GITHUB_ENV"
-    - name: Scan exact image and require fresh vulnerability evidence
+    - name: Scan exact subject and require fresh vulnerability evidence
       shell: bash
       env:
         SCAN_IMAGE: ${{ inputs.image }}
+        SCAN_SBOM: ${{ inputs.sbom }}
         SCAN_OUTPUT: ${{ inputs.output }}
         SCAN_ACTION_PATH: ${{ github.action_path }}
       run: |
+        target=(--image "$SCAN_IMAGE")
+        if test -n "$SCAN_SBOM"; then target=(--sbom "$SCAN_SBOM"); fi
         python3 "$SCAN_ACTION_PATH/scan.py" --trivy "$CLOUDBOX_TRIVY" \
-          --image "$SCAN_IMAGE" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT"
+          "${target[@]}" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT"

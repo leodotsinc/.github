@@ -50,6 +50,11 @@ jobs:
             npm_config_cache="$RUNNER_TEMP/maintenance-npm-cache" \
             npm audit --package-lock-only --audit-level=high --json --registry=https://registry.npmjs.org \
             > maintenance-tool-evidence/npm-audit.json
+      - name: Scan the exact source SBOM with the shared Trivy gate
+        uses: ./actions/maintenance-scan
+        with:
+          sbom: maintenance-tool-evidence/sbom.json
+          output: maintenance-tool-evidence/trivy
       - run: python3 -m unittest discover -s tools -p 'test_*.py' -v
       - name: Retain exact-run source SBOM and advisory results
         if: always()
@@ -59,6 +64,8 @@ jobs:
           path: |
             maintenance-tool-evidence/sbom.json
             maintenance-tool-evidence/npm-audit.json
+            maintenance-tool-evidence/trivy/security.json
+            maintenance-tool-evidence/trivy/trivy-sbom.json
           if-no-files-found: error
           retention-days: 7
       - run: python3 -m unittest discover -s actions/maintenance-scan -p 'test_*.py' -v
