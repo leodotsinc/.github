@@ -1,0 +1,33 @@
+name: Qualified image security scan
+description: Scan one immutable image with a pinned Trivy and fresh database; fail closed without any model calls.
+inputs:
+  image:
+    description: Immutable digest reference or local image ID
+    required: true
+  output:
+    description: Runner-local evidence directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Download verified official Trivy
+      shell: bash
+      run: |
+        set -euo pipefail
+        tools_dir=$(mktemp -d "$RUNNER_TEMP/cloudbox-trivy.XXXXXX")
+        curl --fail --silent --show-error --location --retry 2 --max-time 120 \
+          https://github.com/aquasecurity/trivy/releases/download/v0.74.0/trivy_0.74.0_Linux-64bit.tar.gz \
+          --output "$tools_dir/trivy.tar.gz"
+        printf '%s  %s\n' 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a \
+          "$tools_dir/trivy.tar.gz" | sha256sum --check --status
+        tar -xzf "$tools_dir/trivy.tar.gz" -C "$tools_dir" trivy
+        echo "CLOUDBOX_TRIVY=$tools_dir/trivy" >> "$GITHUB_ENV"
+    - name: Scan exact image and require fresh vulnerability evidence
+      shell: bash
+      env:
+        SCAN_IMAGE: ${{ inputs.image }}
+        SCAN_OUTPUT: ${{ inputs.output }}
+        SCAN_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        python3 "$SCAN_ACTION_PATH/scan.py" --trivy "$CLOUDBOX_TRIVY" \
+          --image "$SCAN_IMAGE" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT"

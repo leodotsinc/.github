@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>leodotsinc/.github//renovate/maintenance"
+  ],
+  "enabled": false,
+  "description": "Activation requires verified Mend installation and retirement of overlapping Dependabot version jobs. Prepared for cloudbox-infra PR 11; no automatic deployment authorization.",
+  "enabledManagers": [
+    "github-actions"
+  ]
+}

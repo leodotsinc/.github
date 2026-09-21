@@ -1,0 +1,66 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Bounded dependency discovery; execution remains owned by qualified Cloudbox release policy.",
+  "extends": [
+    "config:recommended",
+    ":pinDigests"
+  ],
+  "timezone": "America/Sao_Paulo",
+  "automerge": false,
+  "platformAutomerge": false,
+  "ignoreTests": false,
+  "prConcurrentLimit": 2,
+  "branchConcurrentLimit": 3,
+  "prHourlyLimit": 1,
+  "minimumReleaseAge": "14 days",
+  "minimumReleaseAgeBehaviour": "timestamp-required",
+  "dependencyDashboard": true,
+  "labels": [
+    "dependencies"
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 9am on monday"
+    ],
+    "automerge": false
+  },
+  "packageRules": [
+    {
+      "description": "One compatible dependency group per manager and application",
+      "matchManagers": [
+        "npm",
+        "mix",
+        "pip_requirements"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "groupName": "compatible dependencies"
+    },
+    {
+      "description": "Privileged automation and major changes always require review",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": false,
+      "minimumReleaseAge": "14 days"
+    },
+    {
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "automerge": false,
+      "dependencyDashboardApproval": true
+    },
+    {
+      "description": "Docker timestamps are not universally supported. Executor enforces digest first-seen quarantine.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "minimumReleaseAge": null,
+      "automerge": false
+    }
+  ]
+}
