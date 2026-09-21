@@ -3,7 +3,7 @@
   "description": "Bounded dependency discovery; execution remains owned by qualified Cloudbox release policy.",
   "extends": [
     "config:recommended",
-    ":pinDigests"
+    "docker:pinDigests"
   ],
   "timezone": "America/Sao_Paulo",
   "automerge": false,
