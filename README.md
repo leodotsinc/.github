@@ -43,3 +43,33 @@ same CI steps. A mismatch makes `npm ci` fail; CI never edits or commits the loc
 The published Renovate package does not include optional native RE2: the validator
 warns that it uses JavaScript RegExp. This preserves the previous CLI limitation;
 validation of new custom regex managers requires explicit RE2 qualification.
+
+### Source SBOM vulnerability gate
+
+`actions/maintenance-scan` accepts exactly one of `image` (existing immutable
+image path) or `sbom` (a local CycloneDX 1.5 JSON file). Source SBOMs are limited
+to PyPI/npm library components. The caller must first validate the SBOM against
+its manifest/lock; the scanner cannot prove that an omitted lock dependency
+exists. The shared validator does this with `toolchain_inventory.py`; infra's
+Python producer independently checks both qualified wheel resolutions.
+
+The same checksum-pinned Trivy 0.74.0 and database freshness limit of 24 hours
+apply. The SBOM is copied into a private temporary snapshot, hashed, and checked
+again after scanning. Each expected normalized PURL/name/version must appear in
+the proper Trivy ecosystem result, including development/transitive packages.
+Missing or unknown coverage, input drift, unavailable scanner/database and
+malformed output fail closed; high, critical or unknown severity blocks CI.
+Only the optional source-root component can be omitted from registry coverage.
+Input is capped at 8 MiB/10,000 components, output at 64 MiB/10,000 findings,
+and execution at 360 seconds (Trivy's own timeout is five minutes), without
+wrapper retries. The SBOM scanner child receives only PATH and a temporary HOME.
+
+The `security.json` receipt records the source SBOM SHA-256 and covered count,
+not a fictitious image digest. The shared npm job retains it with the raw scan
+and lock-derived SBOM for seven days. Existing pinned image callers remain
+unchanged until a separately reviewed pin update. This does not inventory
+Python/Node executables, OS packages, native libraries embedded in wheels, or
+Trivy itself, and does not replace official advisory review or a runtime scan.
+These limits matter because [Trivy documents reduced accuracy for third-party
+SBOMs](https://trivy.dev/docs/latest/target/sbom/). PURL mapping is checked against
+[the pinned decoder](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/purl/purl.go).
