@@ -5,7 +5,8 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
-import resource
+import select
+import time
 import stat
 import tempfile
 from urllib.parse import unquote
@@ -164,8 +165,31 @@ def evaluate_sbom(report, metadata, observed, sbom, digest, snapshot):
     return status
 
 
-def child_file_limit():
-    resource.setrlimit(resource.RLIMIT_FSIZE, (REPORT_LIMIT, REPORT_LIMIT))
+def bounded_scan(command, env, timeout=360, limit=REPORT_LIMIT):
+    # A process-wide file limit would also truncate Trivy's larger vulnerability
+    # database. Bound only report stdout, with a wall deadline and no retry.
+    output = bytearray()
+    deadline = time.monotonic() + timeout
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as child:
+        try:
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not select.select([child.stdout], [], [], remaining)[0]:
+                    raise subprocess.TimeoutExpired(command, timeout)
+                chunk = os.read(child.stdout.fileno(), min(65536, limit + 1 - len(output)))
+                if not chunk:
+                    break
+                output.extend(chunk)
+                if len(output) > limit:
+                    raise ValueError('SCAN_REPORT_TOO_LARGE')
+            code = child.wait(timeout=max(0.001, deadline - time.monotonic()))
+            if code:
+                raise subprocess.CalledProcessError(code, command)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+    return bytes(output)
 
 
 def main():
@@ -188,7 +212,6 @@ def main():
         status['subject'] = 'source_sbom'
     try:
         with tempfile.TemporaryDirectory(prefix='cloudbox-scan-', dir=args.output) as private:
-            options = {}
             if args.sbom:
                 raw = read_bounded(args.sbom, SBOM_LIMIT)
                 sbom = decode(raw)
@@ -198,7 +221,6 @@ def main():
                 snapshot = Path(private) / 'source.json'
                 snapshot.write_bytes(raw); snapshot.chmod(0o600)
                 mode, target = 'sbom', str(snapshot)
-                options = {'env': {'PATH': os.defpath, 'HOME': private}, 'preexec_fn': child_file_limit}
             else:
                 if not re.fullmatch(r'(?:[a-z0-9][a-z0-9._/:-]*@)?sha256:[a-f0-9]{64}', args.image):
                     raise ValueError('IMMUTABLE_IMAGE_REQUIRED')
@@ -207,9 +229,14 @@ def main():
             command = [args.trivy, mode, '--config', str(config), '--cache-dir', str(args.cache.resolve()),
                        '--disable-telemetry', '--scanners', 'vuln', '--list-all-pkgs', '--ignorefile', '/dev/null',
                        '--ignore-unfixed=false', '--format', 'json', '--timeout', '5m',
-                       '--output', str(report), target]
-            subprocess.run(command, check=True, timeout=360, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **options)
-            report_raw = read_bounded(report, REPORT_LIMIT)
+                       ]
+            if args.sbom:
+                report_raw = bounded_scan(command + [target], {'PATH': os.defpath, 'HOME': private})
+                report.write_bytes(report_raw)
+            else:
+                subprocess.run(command + ['--output', str(report), target], check=True, timeout=360,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                report_raw = read_bounded(report, REPORT_LIMIT)
             metadata = decode(read_bounded(args.cache / 'db/metadata.json', 16384))
             observed = datetime.now(timezone.utc)
             if args.sbom:

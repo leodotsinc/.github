@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -129,23 +130,23 @@ class SbomTests(unittest.TestCase):
             (out/'trivy-sbom.json').write_text('{}')  # a previous result must never be trusted
             argv = ['scan.py', '--trivy', '/verified/trivy', '--sbom', str(source), '--cache', str(cache), '--output', str(out)]
             calls = []
-            def runner(command, **kwargs):
+            def runner(command, env):
+                kwargs = {"env": env}
                 calls.append((command, kwargs))
                 self.assertFalse((out/'trivy-sbom.json').exists())
                 self.assertEqual(command[1], 'sbom')
                 self.assertEqual(set(kwargs['env']), {'PATH','HOME'})
-                self.assertEqual(kwargs['timeout'], 360)
                 self.assertNotIn('MODEL_API_KEY', kwargs['env'])
                 target = Path(command[-1]); self.assertEqual(target.read_bytes(), raw)
                 self.assertEqual(target.stat().st_mode & 0o777, 0o600)
                 if behavior == 'timeout': raise subprocess.TimeoutExpired(command, 360)
-                if behavior == 'missing': return
+                if behavior == 'missing': return b''
                 report = report_for(document(), target)
                 if behavior == 'incomplete': report['Results'][0]['Packages'].pop()
                 if behavior == 'mutate-input': source.write_text('{}')
                 if behavior == 'mutate-snapshot': target.write_text('{}')
-                (out/'trivy-sbom.json').write_text(json.dumps(report))
-            with patch('sys.argv', argv), patch.dict(os.environ, {'MODEL_API_KEY':'synthetic-secret','TRIVY_IGNORE_UNFIXED':'true'}), patch.object(scan.subprocess, 'run', side_effect=runner), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                return json.dumps(report).encode()
+            with patch('sys.argv', argv), patch.dict(os.environ, {'MODEL_API_KEY':'synthetic-secret','TRIVY_IGNORE_UNFIXED':'true'}), patch.object(scan, 'bounded_scan', side_effect=runner), contextlib.redirect_stdout(io.StringIO()) as stdout:
                 result = scan.main()
             evidence = json.loads((out/'security.json').read_text())
             self.assertEqual(len(calls), 1)
@@ -163,6 +164,33 @@ class SbomTests(unittest.TestCase):
             with self.subTest(behavior=behavior):
                 code, result = self.run_cli(behavior)
                 self.assertEqual(code, 1); self.assertEqual(result['status'], 'unknown')
+
+    def test_real_subprocess_output_cap_timeout_exit_and_clean_environment(self):
+        clean = {'PATH': os.defpath, 'HOME': '/nonexistent'}
+        out = scan.bounded_scan([sys.executable, '-c', 'import os; print(os.environ.get("MODEL_API_KEY","absent"))'], clean, timeout=3)
+        self.assertEqual(out.strip(), b'absent')
+        with self.assertRaises(ValueError):
+            scan.bounded_scan([sys.executable, '-c', 'print("x"*5000)'], clean, timeout=3, limit=100)
+        with self.assertRaises(subprocess.TimeoutExpired):
+            scan.bounded_scan([sys.executable, '-c', 'import time;time.sleep(10)'], clean, timeout=0.02)
+        with self.assertRaises(subprocess.CalledProcessError):
+            scan.bounded_scan([sys.executable, '-c', 'raise SystemExit(4)'], clean, timeout=3)
+
+    def test_image_cli_preserves_existing_credential_transport_and_identity_gate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp); cache = root/'cache'; (cache/'db').mkdir(parents=True)
+            (cache/'db/metadata.json').write_text(json.dumps({'UpdatedAt':datetime.now(timezone.utc).isoformat()}))
+            image = 'sha256:' + 'a' * 64
+            argv = ['scan.py','--trivy','/verified/trivy','--image',image,'--cache',str(cache),'--output',str(root/'out')]
+            def runner(command, **kwargs):
+                self.assertEqual(command[1], 'image')
+                self.assertNotIn('env', kwargs)  # existing image callers supply ephemeral DOCKER_CONFIG
+                Path(command[command.index('--output')+1]).write_text(json.dumps({'SchemaVersion':2,
+                    'Metadata':{'ImageID':image}, 'Results':[{'Packages':[{'Name':'synthetic'}]}]}))
+            with patch('sys.argv',argv), patch.object(scan.subprocess,'run',side_effect=runner), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scan.main(),0)
+            status=json.loads((root/'out/security.json').read_text())
+            self.assertEqual(status['image'],image); self.assertNotIn('sbom_sha256',status)
 
     def test_cli_xor_refuses_before_scanner(self):
         for targets in ([], ['--image','sha256:'+'a'*64,'--sbom','input.json']):
