@@ -367,3 +367,23 @@ class GenericMaintenanceTransportTests(unittest.TestCase):
             f.context_file.write_text(json.dumps(changed))
             with self.subTest(changes=changes),mock.patch.dict(send.os.environ,f.env,clear=True):
                 with self.assertRaises(ValueError):send.load_maintenance(f.context_file,'meeting-ai',f.manifest)
+
+
+class WorkflowArtifactTests(unittest.TestCase):
+    def test_fixed_artifact_naming_accepts_new_app_but_refuses_paths_and_cross_app_inputs(self):
+        workflow=(Path(__file__).resolve().parents[2]/'.github/workflows/deploy.yml').read_text()
+        step=workflow.split('      - name: Validate optional maintenance artifact identity\n',1)[1].split('      - name:',1)[0]
+        script='\n'.join(line[10:] for line in step.split('        run: |\n',1)[1].splitlines() if line.startswith('          '))
+        for app,artifact,file,valid in [('pluggy-mcp','pluggy-maintenance-context','maintenance-context.json',True),
+                                      ('blog','blog-maintenance-context','maintenance-context.json',True),
+                                      ('meeting-ai','meeting-ai-maintenance-context','maintenance-context.json',True),
+                                      ('new-reviewed-app','new-reviewed-app-maintenance-context','maintenance-context.json',True),
+                                      ('meeting-ai','blog-maintenance-context','maintenance-context.json',False),
+                                      ('../other','../other-maintenance-context','maintenance-context.json',False),
+                                      ('meeting-ai','meeting-ai-maintenance-context','../maintenance-context.json',False),
+                                      ('x;true','x;true-maintenance-context','maintenance-context.json',False)]:
+            with self.subTest(app=app,artifact=artifact,file=file):
+                result=send.subprocess.run(['/bin/bash','-c',script],env={'APP_ID':app,'ARTIFACT_NAME':artifact,'ARTIFACT_FILE':file},capture_output=True)
+                self.assertEqual(result.returncode==0,valid)
+        self.assertIn('actions/cloudbox-deploy@7571f93c56e675d73c984bd786604d05cc3f4aa3',workflow)
+        self.assertNotIn('github-token:',workflow.split('      - name: Download same-run maintenance context')[1].split('      - name:',1)[0])
