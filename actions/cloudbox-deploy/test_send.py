@@ -281,3 +281,126 @@ class MaintenanceTransportTests(TransportTests):
         self.context_file.write_text(json.dumps(self.context))
         with self.assertRaises(ValueError):
             send.load_maintenance(self.context_file, 'meeting-ai', self.manifest)
+
+
+class GenericMaintenanceTransportTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = MaintenanceTransportTests('test_absence_preserves_original_envelope')
+        self.fixture.setUp(); self.addCleanup(self.fixture.doCleanups)
+
+    def configure(self, app='meeting-ai', repository='leodotsinc/meeting-ai'):
+        f = self.fixture
+        release = copy.deepcopy(f.manifest)
+        release.update(application_kind='first_party', service=app, source_repository='https://github.com/'+repository,
+                       image='ghcr.io/'+repository+'@sha256:'+'a'*64, build={'id':'1234','attempt':1})
+        context = copy.deepcopy(f.context)
+        context.update(app=app, infra_commit='9'*40, config_sha256='3'*64, host_contract_sha256='4'*64,
+                       source_pr=123, evidence_run_id=5678, producer_commit='f'*40,
+                       source_proof={'run_id':5678,'run_attempt':2,'artifact_id':9012,'digest':'sha256:'+'5'*64})
+        context['base_manifest'].update(application_kind='first_party', service=app, source_repository=release['source_repository'])
+        context['baseline_receipt_sha256'] = send.canonical_hash(context['base_manifest'])
+        context['request_id'] = send.canonical_hash({k:context[k] for k in
+            ('app','baseline_receipt_sha256','head_sha','tree_sha')})
+        f.manifest=release;f.release.write_text(json.dumps(release));f.context_file.write_text(json.dumps(context))
+        f.env.update(CLOUDBOX_APP_ID=app,CLOUDBOX_MAINTENANCE_FILE=str(f.context_file),
+            GITHUB_REPOSITORY=repository,GITHUB_WORKFLOW_REF=repository+'/.github/workflows/maintenance.yml@refs/heads/main',
+            GITHUB_REF='refs/heads/main',GITHUB_SHA='f'*40,GITHUB_WORKFLOW_SHA='f'*40,GITHUB_RUN_ID='1234',GITHUB_RUN_ATTEMPT='1')
+        f.success={'ok':True,'status':'verified','release':copy.deepcopy(release)}
+        f.success['release']['deployment']=copy.deepcopy(f.context['base_manifest']['deployment'])
+        f.success['release']['deployment']['observed_image']=release['image']
+        return context
+
+    def test_meeting_and_new_apps_use_same_closed_stdin_protocol_without_client_allowlist(self):
+        for app, repo in [('meeting-ai','leodotsinc/meeting-ai'),('new-reviewed-app','leodots/new-reviewed-app')]:
+            with self.subTest(app=app):
+                context=self.configure(app,repo);f=self.fixture
+                run=f.execute(f.success)
+                token, body = run.call_args.kwargs['input'].split(b'\n',2)[:2]
+                self.assertEqual(token,b'TOKEN_VALUE')
+                self.assertEqual(json.loads(body)['maintenance'],context)
+                self.assertNotIn('TOKEN_VALUE',str(run.call_args.args))
+                self.assertNotIn('TOKEN_VALUE',json.dumps(f.evidence()))
+                self.assertNotIn('maintenance',f.evidence())
+
+    def test_third_party_transport_keeps_upstream_revision_separate_from_recipe_commit(self):
+        context = self.configure('third-service', 'leodots/cloudbox-infra'); f = self.fixture
+        for manifest in (f.manifest, context['base_manifest']):
+            manifest.update(application_kind='third_party', git_sha=None, build=None,
+                            source_repository='https://github.com/upstream/third-service')
+        context['source_proof']['run_id'] = 5679  # Native pipelines may use a separate source proof run.
+        context['baseline_receipt_sha256'] = send.canonical_hash(context['base_manifest'])
+        context['request_id'] = send.canonical_hash({k: context[k] for k in
+            ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')})
+        f.context_file.write_text(json.dumps(context))
+        with mock.patch.dict(send.os.environ, f.env, clear=True):
+            self.assertEqual(send.load_maintenance(f.context_file, 'third-service', f.manifest), context)
+            for delta in ({'build': {'id':'1234','attempt':1}}, {'git_sha':'invalid'},
+                          {'source_repository':'https://github.com/other/source'}, {'application_kind':'first_party'}):
+                with self.subTest(delta=delta), self.assertRaises(ValueError):
+                    send.load_maintenance(f.context_file, 'third-service', {**f.manifest, **delta})
+
+    def test_generic_context_authenticates_caller_repository_workflow_source_and_attempt(self):
+        self.configure();f=self.fixture
+        for key,bad in [('GITHUB_REPOSITORY','leodotsinc/other'),('GITHUB_REPOSITORY','outside/new'),
+                        ('GITHUB_WORKFLOW_REF','leodotsinc/meeting-ai/.github/workflows/maintenance.yml@refs/heads/feature'),
+                        ('GITHUB_WORKFLOW_REF','leodotsinc/other/.github/workflows/maintenance.yml@refs/heads/main'),
+                        ('GITHUB_REF','refs/tags/v1'),('GITHUB_SHA','a'*40),('GITHUB_WORKFLOW_SHA','a'*40),
+                        ('GITHUB_RUN_ID','999'),('GITHUB_RUN_ATTEMPT','2')]:
+            with self.subTest(key=key,bad=bad),mock.patch.dict(send.os.environ,{**f.env,key:bad},clear=True), \
+                 mock.patch.object(send.subprocess,'run') as run:
+                with self.assertRaises(ValueError):send.main()
+                run.assert_not_called()
+        with mock.patch.dict(send.os.environ,{},clear=True):
+            with self.assertRaises(ValueError):send.load_maintenance(f.context_file,'meeting-ai',f.manifest)
+
+    def test_generic_context_refuses_identity_drift_controls_and_unbound_source_proof(self):
+        original=self.configure();f=self.fixture
+        changes=[('app','other'),('mode','urgent'),('source_pr',True),('source_pr',{}),
+                 ('config_sha256','bad'),('host_contract_sha256','bad'),('infra_commit','bad'),
+                 ('source_proof',dict(original['source_proof'],run_id=0)),
+                 ('source_proof',dict(original['source_proof'],run_attempt=True)),
+                 ('source_proof',dict(original['source_proof'],digest='sha256:'+'0'*63)),
+                 ('source_proof',dict(original['source_proof'],authorized=True)),
+                 ('base_manifest',dict(original['base_manifest'],source_repository='https://github.com/leodots/other')),
+                 ('request_id','0'*64),('merged_sha','a'*40),('host','example.invalid'),
+                 ('command','true'),('helper_path','/bin/true'),('control_sha256','0'*64),('authorized',True)]
+        for key,bad in changes:
+            f.context_file.write_text(json.dumps({**original,key:bad}))
+            with self.subTest(key=key),mock.patch.dict(send.os.environ,f.env,clear=True),mock.patch.object(send.subprocess,'run') as run:
+                with self.assertRaises(ValueError):send.main()
+                run.assert_not_called()
+
+    def test_release_and_baseline_must_bind_the_same_app_repository_and_built_run(self):
+        original=self.configure();f=self.fixture
+        for changes in ({'service':'other'},{'source_repository':'https://github.com/leodots/other'},
+                        {'git_sha':'a'*40},{'build':{'id':'999','attempt':1}},
+                        {'build':{'id':'1234','attempt':True}},{'deployment':{'status':'verified'}}):
+            with self.subTest(changes=changes),mock.patch.dict(send.os.environ,f.env,clear=True):
+                with self.assertRaises(ValueError):send.load_maintenance(f.context_file,'meeting-ai',{**f.manifest,**changes})
+        for changes in ({'deployment':{'status':'built'}},{'service':'other'},{'git_sha':'bad'}):
+            changed=copy.deepcopy(original);changed['base_manifest'].update(changes)
+            changed['baseline_receipt_sha256']=send.canonical_hash(changed['base_manifest'])
+            changed['request_id']=send.canonical_hash({k:changed[k] for k in ('app','baseline_receipt_sha256','head_sha','tree_sha')})
+            f.context_file.write_text(json.dumps(changed))
+            with self.subTest(changes=changes),mock.patch.dict(send.os.environ,f.env,clear=True):
+                with self.assertRaises(ValueError):send.load_maintenance(f.context_file,'meeting-ai',f.manifest)
+
+
+class WorkflowArtifactTests(unittest.TestCase):
+    def test_fixed_artifact_naming_accepts_new_app_but_refuses_paths_and_cross_app_inputs(self):
+        workflow=(Path(__file__).resolve().parents[2]/'.github/workflows/deploy.yml').read_text()
+        step=workflow.split('      - name: Validate optional maintenance artifact identity\n',1)[1].split('      - name:',1)[0]
+        script='\n'.join(line[10:] for line in step.split('        run: |\n',1)[1].splitlines() if line.startswith('          '))
+        for app,artifact,file,valid in [('pluggy-mcp','pluggy-maintenance-context','maintenance-context.json',True),
+                                      ('blog','blog-maintenance-context','maintenance-context.json',True),
+                                      ('meeting-ai','meeting-ai-maintenance-context','maintenance-context.json',True),
+                                      ('new-reviewed-app','new-reviewed-app-maintenance-context','maintenance-context.json',True),
+                                      ('meeting-ai','blog-maintenance-context','maintenance-context.json',False),
+                                      ('../other','../other-maintenance-context','maintenance-context.json',False),
+                                      ('meeting-ai','meeting-ai-maintenance-context','../maintenance-context.json',False),
+                                      ('x;true','x;true-maintenance-context','maintenance-context.json',False)]:
+            with self.subTest(app=app,artifact=artifact,file=file):
+                result=send.subprocess.run(['/bin/bash','-c',script],env={'APP_ID':app,'ARTIFACT_NAME':artifact,'ARTIFACT_FILE':file},capture_output=True)
+                self.assertEqual(result.returncode==0,valid)
+        self.assertIn('actions/cloudbox-deploy@76a15c62a4f019febef9fcee811e6dca6ac7d9a6',workflow)
+        self.assertNotIn('github-token:',workflow.split('      - name: Download same-run maintenance context')[1].split('      - name:',1)[0])

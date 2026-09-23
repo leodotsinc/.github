@@ -7,7 +7,7 @@ stdin line. It is never added to argv, the release JSON, or a file.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 import json
 import os
@@ -66,6 +66,9 @@ MAINTENANCE_KEYS = {
     "delta_sha256", "window", "expires_at", "base_manifest", "producer_commit",
     "evidence_run_id", "release_run_id",
 }
+GENERIC_MAINTENANCE_KEYS = MAINTENANCE_KEYS | {
+    "infra_commit", "config_sha256", "host_contract_sha256", "source_proof",
+}
 MAX_MAINTENANCE = 16384
 
 
@@ -89,13 +92,15 @@ def load_maintenance(path, app, release):
         require(parsed.tzinfo is not None)
         return parsed
 
-    require(app in {"pluggy-mcp", "blog"} and path.is_file() and not path.is_symlink())
+    require(isinstance(app, str) and APP_ID.fullmatch(app) and path.is_file() and not path.is_symlink())
     with path.open("rb") as stream:
         raw = stream.read(MAX_MAINTENANCE + 1)
     require(len(raw) <= MAX_MAINTENANCE)
     def invalid_constant(_):
         raise ValueError("invalid maintenance context")
     value = json.loads(raw, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+    if app not in {"pluggy-mcp", "blog"}:
+        return generic_maintenance(value, app, release, require, sha, timestamp)
     expected_keys = MAINTENANCE_KEYS | ({"control_sha256"} if app == "blog" else set())
     require(isinstance(value, dict) and set(value) == expected_keys)
     if app == "blog":
@@ -132,6 +137,63 @@ def load_maintenance(path, app, release):
     require(isinstance(window, dict) and set(window) == {"start", "end", "timezone"}
             and window["timezone"] == "America/Sao_Paulo")
     require(timestamp(window["start"]) < timestamp(value["expires_at"]) <= timestamp(window["end"]))
+    return value
+
+
+def generic_maintenance(value, app, release, require, sha, timestamp):
+    """Identity-only common transport. Registration/authorization is host-owned."""
+    require(isinstance(value, dict) and set(value) == GENERIC_MAINTENANCE_KEYS and not contains_secret_field(value))
+    require(type(value['schema_version']) is int and value['schema_version'] == 1 and
+            value['app'] == app and value['mode'] == 'monthly')
+    for key in ('request_id', 'policy_sha256', 'baseline_receipt_sha256', 'delta_sha256', 'config_sha256', 'host_contract_sha256'):
+        require(sha(value[key], 64))
+    for key in ('infra_commit', 'head_sha', 'merged_sha', 'tree_sha', 'producer_commit'):
+        require(sha(value[key]))
+    for key in ('source_pr', 'evidence_run_id', 'release_run_id'):
+        require(type(value[key]) is int and 0 < value[key] <= 2**53 - 1)
+    proof = value['source_proof']
+    require(isinstance(proof, dict) and set(proof) == {'run_id', 'run_attempt', 'artifact_id', 'digest'})
+    require(all(type(proof[key]) is int and 0 < proof[key] <= 2**53 - 1 for key in ('run_id', 'run_attempt', 'artifact_id')) and
+            isinstance(proof['digest'], str) and re.fullmatch(r'sha256:[a-f0-9]{64}', proof['digest']))
+    # GitHub supplies these immutable caller identities. Inputs cannot select a
+    # repository, workflow branch or remote executable. The host verifies the
+    # precise registered workflow/code and the scoped forced key independently.
+    repository = os.environ.get('GITHUB_REPOSITORY', '')
+    require(re.fullmatch(r'(?:leodots|leodotsinc)/[A-Za-z0-9_.-]+', repository) and
+            repository.split('/')[1] not in {'.', '..'})
+    caller = os.environ.get('GITHUB_WORKFLOW_REF', '')
+    require(re.fullmatch(re.escape(repository) + r'/\.github/workflows/[A-Za-z0-9_-]+\.ya?ml@refs/heads/main', caller))
+    require(os.environ.get('GITHUB_REF') == 'refs/heads/main' and
+            os.environ.get('GITHUB_SHA') == os.environ.get('GITHUB_WORKFLOW_SHA') == value['producer_commit'] and
+            os.environ.get('GITHUB_RUN_ID') == str(value['release_run_id']) and os.environ.get('GITHUB_RUN_ATTEMPT') == '1')
+    base = value['base_manifest']
+    require(isinstance(base, dict) and base.get('service') == app and
+            base.get('source_repository') == release.get('source_repository') and
+            isinstance(base.get('deployment'), dict) and base['deployment'].get('status') == 'verified')
+    require(canonical_hash(base) == value['baseline_receipt_sha256'])
+    require(canonical_hash({key: value[key] for key in ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')}) == value['request_id'])
+    require(release.get('service') == app and isinstance(release.get('deployment'), dict) and
+            release['deployment'].get('status') == 'built')
+    kind = release.get('application_kind')
+    require(kind in {'first_party', 'third_party'} and base.get('application_kind') == kind)
+    if kind == 'first_party':
+        require(sha(base.get('git_sha')) and base.get('source_repository') == 'https://github.com/' + repository and
+                release.get('git_sha') == value['merged_sha'] and isinstance(release.get('build'), dict) and
+                str(release['build'].get('id')) == str(value['release_run_id']) and
+                type(release['build'].get('attempt')) is int and release['build']['attempt'] == 1)
+    else:
+        # The recipe/CI commit is bound above. An upstream image has its own
+        # optional revision and no local build; root registration still checks
+        # its source, image origins and qualified data helper independently.
+        require(all(v is None or sha(v) for v in (base.get('git_sha'), release.get('git_sha'))) and
+                release.get('build') is None and base.get('build') is None and
+                isinstance(release.get('source_repository'), str) and
+                re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', release['source_repository']))
+    window = value['window']
+    require(isinstance(window, dict) and set(window) == {'start', 'end', 'timezone'} and
+            window['timezone'] == 'America/Sao_Paulo')
+    start, end, expiry = timestamp(window['start']), timestamp(window['end']), timestamp(value['expires_at'])
+    require(start < expiry <= end and end - start <= timedelta(hours=2))
     return value
 
 

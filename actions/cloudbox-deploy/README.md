@@ -32,3 +32,23 @@ Run `python3 -m unittest actions/cloudbox-deploy/test_send.py -v` from the repos
 root. Publish the action commit first, then pin that SHA in the reusable workflow;
 publish that workflow commit before updating callers. Never replace pins with
 `main` to work around this publication order.
+
+Monthly contexts for other registered single-image apps use the closed common
+identity contract: immutable baseline, PR number/head/tree, merged source,
+source-proof artifact reference, infra/config/host-contract hashes, monthly window
+and separate source/release run identities. The artifact name is
+`<app-id>-maintenance-context`, containing only `maintenance-context.json`.
+The context remains capped at 16 KiB and carries no transport destination,
+command, executable path, credential or authorization flag.
+
+The common form binds the app id to a caller workflow on `main` under the approved
+`leodots`/`leodotsinc` owners, its exact producer commit, run and first attempt.
+Own-app manifests bind to that repository and the same-run build. Third-party
+manifests retain their upstream repository, optional revision and absent build;
+the recipe commit remains separate. Source proof and other CI evidence may come
+from different runs authenticated by the application receiver and host. The host still validates the
+reviewed catalog/descriptor, exact workflow/code, current consent and policy,
+locks, backups and release evidence. A structurally valid new app is not thereby
+registered or qualified on the host. Blog/Pluggy keep their existing distinct
+context schemas; the ordinary path without a context is unchanged. Native HQ
+still uses its existing separate transport and result adapter.
