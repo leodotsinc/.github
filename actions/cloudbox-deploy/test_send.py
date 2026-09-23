@@ -291,13 +291,13 @@ class GenericMaintenanceTransportTests(unittest.TestCase):
     def configure(self, app='meeting-ai', repository='leodotsinc/meeting-ai'):
         f = self.fixture
         release = copy.deepcopy(f.manifest)
-        release.update(service=app, source_repository='https://github.com/'+repository,
+        release.update(application_kind='first_party', service=app, source_repository='https://github.com/'+repository,
                        image='ghcr.io/'+repository+'@sha256:'+'a'*64, build={'id':'1234','attempt':1})
         context = copy.deepcopy(f.context)
         context.update(app=app, infra_commit='9'*40, config_sha256='3'*64, host_contract_sha256='4'*64,
                        source_pr=123, evidence_run_id=5678, producer_commit='f'*40,
                        source_proof={'run_id':5678,'run_attempt':2,'artifact_id':9012,'digest':'sha256:'+'5'*64})
-        context['base_manifest'].update(service=app, source_repository=release['source_repository'])
+        context['base_manifest'].update(application_kind='first_party', service=app, source_repository=release['source_repository'])
         context['baseline_receipt_sha256'] = send.canonical_hash(context['base_manifest'])
         context['request_id'] = send.canonical_hash({k:context[k] for k in
             ('app','baseline_receipt_sha256','head_sha','tree_sha')})
@@ -322,6 +322,23 @@ class GenericMaintenanceTransportTests(unittest.TestCase):
                 self.assertNotIn('TOKEN_VALUE',json.dumps(f.evidence()))
                 self.assertNotIn('maintenance',f.evidence())
 
+    def test_third_party_transport_keeps_upstream_revision_separate_from_recipe_commit(self):
+        context = self.configure('third-service', 'leodots/cloudbox-infra'); f = self.fixture
+        for manifest in (f.manifest, context['base_manifest']):
+            manifest.update(application_kind='third_party', git_sha=None, build=None,
+                            source_repository='https://github.com/upstream/third-service')
+        context['source_proof']['run_id'] = 5679  # Native pipelines may use a separate source proof run.
+        context['baseline_receipt_sha256'] = send.canonical_hash(context['base_manifest'])
+        context['request_id'] = send.canonical_hash({k: context[k] for k in
+            ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')})
+        f.context_file.write_text(json.dumps(context))
+        with mock.patch.dict(send.os.environ, f.env, clear=True):
+            self.assertEqual(send.load_maintenance(f.context_file, 'third-service', f.manifest), context)
+            for delta in ({'build': {'id':'1234','attempt':1}}, {'git_sha':'invalid'},
+                          {'source_repository':'https://github.com/other/source'}, {'application_kind':'first_party'}):
+                with self.subTest(delta=delta), self.assertRaises(ValueError):
+                    send.load_maintenance(f.context_file, 'third-service', {**f.manifest, **delta})
+
     def test_generic_context_authenticates_caller_repository_workflow_source_and_attempt(self):
         self.configure();f=self.fixture
         for key,bad in [('GITHUB_REPOSITORY','leodotsinc/other'),('GITHUB_REPOSITORY','outside/new'),
@@ -340,7 +357,7 @@ class GenericMaintenanceTransportTests(unittest.TestCase):
         original=self.configure();f=self.fixture
         changes=[('app','other'),('mode','urgent'),('source_pr',True),('source_pr',{}),
                  ('config_sha256','bad'),('host_contract_sha256','bad'),('infra_commit','bad'),
-                 ('source_proof',dict(original['source_proof'],run_id=1)),
+                 ('source_proof',dict(original['source_proof'],run_id=0)),
                  ('source_proof',dict(original['source_proof'],run_attempt=True)),
                  ('source_proof',dict(original['source_proof'],digest='sha256:'+'0'*63)),
                  ('source_proof',dict(original['source_proof'],authorized=True)),

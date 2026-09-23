@@ -154,8 +154,7 @@ def generic_maintenance(value, app, release, require, sha, timestamp):
     proof = value['source_proof']
     require(isinstance(proof, dict) and set(proof) == {'run_id', 'run_attempt', 'artifact_id', 'digest'})
     require(all(type(proof[key]) is int and 0 < proof[key] <= 2**53 - 1 for key in ('run_id', 'run_attempt', 'artifact_id')) and
-            isinstance(proof['digest'], str) and re.fullmatch(r'sha256:[a-f0-9]{64}', proof['digest']) and
-            proof['run_id'] == value['evidence_run_id'])
+            isinstance(proof['digest'], str) and re.fullmatch(r'sha256:[a-f0-9]{64}', proof['digest']))
     # GitHub supplies these immutable caller identities. Inputs cannot select a
     # repository, workflow branch or remote executable. The host verifies the
     # precise registered workflow/code and the scoped forced key independently.
@@ -168,15 +167,28 @@ def generic_maintenance(value, app, release, require, sha, timestamp):
             os.environ.get('GITHUB_SHA') == os.environ.get('GITHUB_WORKFLOW_SHA') == value['producer_commit'] and
             os.environ.get('GITHUB_RUN_ID') == str(value['release_run_id']) and os.environ.get('GITHUB_RUN_ATTEMPT') == '1')
     base = value['base_manifest']
-    require(isinstance(base, dict) and base.get('service') == app and sha(base.get('git_sha')) and
-            base.get('source_repository') == release.get('source_repository') == 'https://github.com/' + repository and
+    require(isinstance(base, dict) and base.get('service') == app and
+            base.get('source_repository') == release.get('source_repository') and
             isinstance(base.get('deployment'), dict) and base['deployment'].get('status') == 'verified')
     require(canonical_hash(base) == value['baseline_receipt_sha256'])
     require(canonical_hash({key: value[key] for key in ('app', 'baseline_receipt_sha256', 'head_sha', 'tree_sha')}) == value['request_id'])
-    require(release.get('service') == app and release.get('git_sha') == value['merged_sha'] and
-            isinstance(release.get('build'), dict) and str(release['build'].get('id')) == str(value['release_run_id']) and
-            type(release['build'].get('attempt')) is int and release['build']['attempt'] == 1 and
-            isinstance(release.get('deployment'), dict) and release['deployment'].get('status') == 'built')
+    require(release.get('service') == app and isinstance(release.get('deployment'), dict) and
+            release['deployment'].get('status') == 'built')
+    kind = release.get('application_kind')
+    require(kind in {'first_party', 'third_party'} and base.get('application_kind') == kind)
+    if kind == 'first_party':
+        require(sha(base.get('git_sha')) and base.get('source_repository') == 'https://github.com/' + repository and
+                release.get('git_sha') == value['merged_sha'] and isinstance(release.get('build'), dict) and
+                str(release['build'].get('id')) == str(value['release_run_id']) and
+                type(release['build'].get('attempt')) is int and release['build']['attempt'] == 1)
+    else:
+        # The recipe/CI commit is bound above. An upstream image has its own
+        # optional revision and no local build; root registration still checks
+        # its source, image origins and qualified data helper independently.
+        require(all(v is None or sha(v) for v in (base.get('git_sha'), release.get('git_sha'))) and
+                release.get('build') is None and base.get('build') is None and
+                isinstance(release.get('source_repository'), str) and
+                re.fullmatch(r'https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', release['source_repository']))
     window = value['window']
     require(isinstance(window, dict) and set(window) == {'start', 'end', 'timezone'} and
             window['timezone'] == 'America/Sao_Paulo')

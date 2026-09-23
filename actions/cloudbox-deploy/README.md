@@ -41,9 +41,12 @@ and separate source/release run identities. The artifact name is
 The context remains capped at 16 KiB and carries no transport destination,
 command, executable path, credential or authorization flag.
 
-The common form binds both manifests to the GitHub caller repository under the
-approved `leodots`/`leodotsinc` owners, the app id, a caller workflow on `main`,
-its exact producer commit, run and first attempt. The host still validates the
+The common form binds the app id to a caller workflow on `main` under the approved
+`leodots`/`leodotsinc` owners, its exact producer commit, run and first attempt.
+Own-app manifests bind to that repository and the same-run build. Third-party
+manifests retain their upstream repository, optional revision and absent build;
+the recipe commit remains separate. Source proof and other CI evidence may come
+from different runs authenticated by the application receiver and host. The host still validates the
 reviewed catalog/descriptor, exact workflow/code, current consent and policy,
 locks, backups and release evidence. A structurally valid new app is not thereby
 registered or qualified on the host. Blog/Pluggy keep their existing distinct
