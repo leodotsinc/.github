@@ -2,11 +2,14 @@ name: Deploy transport CI
 
 on:
   push:
+    branches: [main]
     paths:
       - "actions/cloudbox-deploy/**"
       - ".github/workflows/deploy-transport-ci.yml"
       - ".github/workflows/deploy.yml"
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "actions/cloudbox-deploy/**"
       - ".github/workflows/deploy-transport-ci.yml"
@@ -15,8 +18,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: deploy-transport-ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

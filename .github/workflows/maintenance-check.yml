@@ -1,17 +1,21 @@
 name: Maintenance contracts
 on:
   push:
+    branches: [main]
     paths: ['renovate/**', 'package.json', 'package-lock.json', 'tools/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
   pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths: ['renovate/**', 'package.json', 'package-lock.json', 'tools/**', 'renovate.json', 'actions/maintenance-scan/**', '.github/workflows/maintenance-check.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: maintenance-check-${{ github.ref }}
-  cancel-in-progress: true
+  group: maintenance-check-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   validate:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
