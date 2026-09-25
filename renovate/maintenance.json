@@ -8,6 +8,7 @@
   "timezone": "America/Sao_Paulo",
   "automerge": false,
   "platformAutomerge": false,
+  "draftPR": true,
   "ignoreTests": false,
   "prConcurrentLimit": 2,
   "branchConcurrentLimit": 3,
