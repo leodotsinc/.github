@@ -41,6 +41,15 @@ def validate(report, returncode):
             raise ValueError('NPM_AUDIT_FINDING_INVALID')
         if not isinstance(value.get('via'), list) or not value['via'] or not isinstance(value.get('nodes'), list) or not value['nodes']:
             raise ValueError('NPM_AUDIT_FINDING_INVALID')
+        if not all(isinstance(node, str) and node for node in value['nodes']):
+            raise ValueError('NPM_AUDIT_FINDING_INVALID')
+        for advisory in value['via']:
+            if isinstance(advisory, str) and advisory:
+                continue
+            if not isinstance(advisory, dict) or advisory.get('severity') not in observed or type(advisory.get('source')) is not int:
+                raise ValueError('NPM_AUDIT_ADVISORY_INVALID')
+            if not all(isinstance(advisory.get(key), str) and advisory[key] for key in ('name', 'dependency', 'title', 'url', 'range')):
+                raise ValueError('NPM_AUDIT_ADVISORY_INVALID')
         observed[value['severity']] += 1
     expected = {**observed, 'total': len(findings)}
     if set(counts) != set(expected) or any(type(v) is not int or v < 0 for v in counts.values()) or counts != expected:

@@ -9,7 +9,7 @@ class AuditPolicyTests(unittest.TestCase):
         findings = {}
         if severity:
             counts[severity] = 1
-            findings['package'] = {'name': 'package', 'severity': severity, 'via': [{'title': 'test advisory'}], 'nodes': ['node_modules/package']}
+            findings['package'] = {'name': 'package', 'severity': severity, 'via': [{'source': 1, 'name': 'package', 'dependency': 'package', 'title': 'test advisory', 'url': 'https://github.com/advisories/test', 'range': '<=1', 'severity': severity}], 'nodes': ['node_modules/package']}
         counts['total'] = len(findings)
         return {'auditReportVersion': 2, 'vulnerabilities': findings, 'metadata': {'vulnerabilities': counts, 'dependencies': {'total': 1}}}
 
@@ -30,6 +30,8 @@ class AuditPolicyTests(unittest.TestCase):
         report = self.report('high'); report['metadata']['vulnerabilities']['high'] = True; cases.append((report, 1))
         report = self.report('high'); report['metadata']['vulnerabilities']['total'] = 2; cases.append((report, 1))
         report = self.report('high'); report['vulnerabilities']['package']['nodes'] = []; cases.append((report, 1))
+        report = self.report('high'); report['vulnerabilities']['package']['nodes'] = [None]; cases.append((report, 1))
+        report = self.report('high'); report['vulnerabilities']['package']['via'] = [None]; cases.append((report, 1))
         for report, code in cases:
             with self.subTest(report=report, code=code), self.assertRaises(ValueError):
                 validate(report, code)
