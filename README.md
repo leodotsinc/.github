@@ -94,3 +94,10 @@ explicitly selects strict for its own source-lock gate. Each application must
 review its local receipt validators when adopting the new scanner; updating a
 pin alone may be insufficient. Pluggy owns its risk decision and pins its
 adopted scanner commit.
+
+The central repository's npm audit uses advisory reporting under the owner's
+2026-10-05 approval. `tools/npm_audit_policy.py` retains the complete npm JSON
+and writes a separate warning summary. It accepts npm's finding exit only when
+the versioned report, package coverage, severity counts and exit status agree.
+Network/tool failures, malformed JSON, missing coverage and inconsistent
+evidence still fail. The source SBOM Trivy step keeps its explicit strict policy.

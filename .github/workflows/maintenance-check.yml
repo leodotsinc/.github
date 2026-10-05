@@ -52,8 +52,7 @@ jobs:
         run: |
           env -i PATH="$PATH" HOME="$RUNNER_TEMP/maintenance-home" \
             npm_config_cache="$RUNNER_TEMP/maintenance-npm-cache" \
-            npm audit --package-lock-only --audit-level=high --json --registry=https://registry.npmjs.org \
-            > maintenance-tool-evidence/npm-audit.json
+            python3 tools/npm_audit_policy.py --output maintenance-tool-evidence
       - name: Scan the exact source SBOM with the shared Trivy gate
         uses: ./actions/maintenance-scan
         with:
@@ -69,6 +68,7 @@ jobs:
           path: |
             maintenance-tool-evidence/sbom.json
             maintenance-tool-evidence/npm-audit.json
+            maintenance-tool-evidence/npm-audit-summary.json
             maintenance-tool-evidence/trivy/security.json
             maintenance-tool-evidence/trivy/trivy-sbom.json
           if-no-files-found: error
