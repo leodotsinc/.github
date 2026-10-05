@@ -59,6 +59,7 @@ jobs:
         with:
           sbom: maintenance-tool-evidence/sbom.json
           output: maintenance-tool-evidence/trivy
+          vulnerability_policy: strict
       - run: python3 -m unittest discover -s tools -p 'test_*.py' -v
       - name: Retain exact-run source SBOM and advisory results
         if: always()

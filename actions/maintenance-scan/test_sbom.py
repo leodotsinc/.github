@@ -108,7 +108,10 @@ class SbomTests(unittest.TestCase):
     def test_high_critical_and_unknown_block_medium_reported(self):
         for severity in ('HIGH', 'CRITICAL', 'UNKNOWN', 'unrecognized', 'MEDIUM'):
             self.report['Results'][0]['Vulnerabilities'] = [{'Severity': severity}]
-            self.assertEqual(self.evaluate()['status'], 'passed' if severity == 'MEDIUM' else 'blocked')
+            self.assertEqual(self.evaluate()['status'], 'passed' if severity == 'MEDIUM' else 'warning')
+            self.assertEqual(scan.evaluate_sbom(self.report, self.db, self.now, self.sbom,
+                             'a' * 64, '/private/source.json', 'strict')['status'],
+                             'passed' if severity == 'MEDIUM' else 'blocked')
 
     def test_bounded_files_and_strict_json(self):
         for raw in (b'{"x":1,"x":2}', b'{"x":NaN}'):
@@ -121,7 +124,7 @@ class SbomTests(unittest.TestCase):
             fifo = Path(tmp)/'fifo'; os.mkfifo(fifo)
             with self.assertRaises(ValueError): scan.read_bounded(fifo, 8)
 
-    def run_cli(self, behavior='success'):
+    def run_cli(self, behavior='success', policy=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp); source = root/'source.json'; source.write_text(json.dumps(document()))
             raw = source.read_bytes(); cache = root/'cache'; (cache/'db').mkdir(parents=True)
@@ -129,6 +132,8 @@ class SbomTests(unittest.TestCase):
             out = root/'out'; out.mkdir()
             (out/'trivy-sbom.json').write_text('{}')  # a previous result must never be trusted
             argv = ['scan.py', '--trivy', '/verified/trivy', '--sbom', str(source), '--cache', str(cache), '--output', str(out)]
+            if policy:
+                argv += ['--vulnerability-policy', policy]
             calls = []
             def runner(command, env):
                 kwargs = {"env": env}
@@ -161,9 +166,10 @@ class SbomTests(unittest.TestCase):
 
     def test_cli_missing_timeout_incomplete_and_drift_never_green(self):
         for behavior in ('missing','timeout','incomplete','mutate-input','mutate-snapshot'):
-            with self.subTest(behavior=behavior):
-                code, result = self.run_cli(behavior)
-                self.assertEqual(code, 1); self.assertEqual(result['status'], 'unknown')
+            for policy in (None, 'strict'):
+                with self.subTest(behavior=behavior, policy=policy):
+                    code, result = self.run_cli(behavior, policy)
+                    self.assertEqual(code, 1); self.assertEqual(result['status'], 'unknown')
 
     def test_real_subprocess_output_cap_timeout_exit_and_clean_environment(self):
         clean = {'PATH': os.defpath, 'HOME': '/nonexistent'}
@@ -191,6 +197,33 @@ class SbomTests(unittest.TestCase):
                 self.assertEqual(scan.main(),0)
             status=json.loads((root/'out/security.json').read_text())
             self.assertEqual(status['image'],image); self.assertNotIn('sbom_sha256',status)
+
+    def test_image_cli_advisory_only_tolerates_verified_findings(self):
+        image = 'sha256:' + 'a' * 64
+        for behavior, expected_code, expected_status in (
+                ('finding', 0, 'warning'), ('failure', 1, 'unknown'),
+                ('malformed', 1, 'unknown')):
+            with self.subTest(behavior=behavior), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp); cache=root/'cache'; (cache/'db').mkdir(parents=True)
+                (cache/'db/metadata.json').write_text(json.dumps({'UpdatedAt':datetime.now(timezone.utc).isoformat()}))
+                argv=['scan.py','--trivy','/verified/trivy','--image',image,'--cache',str(cache),
+                      '--output',str(root/'out'),'--vulnerability-policy','advisory']
+                def runner(command, **kwargs):
+                    if behavior == 'failure':
+                        raise subprocess.CalledProcessError(1, command)
+                    value={'SchemaVersion':2,'Metadata':{'ImageID':image},'Results':[{'Packages':[{'Name':'synthetic'}],
+                           'Vulnerabilities':[{'VulnerabilityID':'CVE-test','Severity':'HIGH'}]}]}
+                    if behavior == 'malformed':
+                        value['SchemaVersion']=1
+                    Path(command[command.index('--output')+1]).write_text(json.dumps(value))
+                with patch('sys.argv',argv), patch.object(scan.subprocess,'run',side_effect=runner), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(scan.main(),expected_code)
+                evidence=json.loads((root/'out/security.json').read_text())
+                self.assertEqual(evidence['status'],expected_status)
+                if behavior == 'finding':
+                    self.assertEqual(evidence['policy'],'advisory')
+                    self.assertEqual(evidence['counts']['HIGH'],1)
+                    self.assertEqual(evidence['findings'][0]['VulnerabilityID'],'CVE-test')
 
     def test_cli_xor_refuses_before_scanner(self):
         for targets in ([], ['--image','sha256:'+'a'*64,'--sbom','input.json']):
