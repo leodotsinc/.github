@@ -23,5 +23,24 @@ class ScanTests(unittest.TestCase):
     def test_unknown_high_and_critical_block(self):
         for severity in ('HIGH','CRITICAL','UNKNOWN','unrecognized'):
             self.report['Results'][0]['Vulnerabilities']=[{'Severity':severity}]
-            self.assertEqual(scan.evaluate(self.report,self.db,self.now,self.image)['status'],'blocked')
+            self.assertEqual(scan.evaluate(self.report,self.db,self.now,self.image,'strict')['status'],'blocked')
+            self.assertEqual(scan.evaluate(self.report,self.db,self.now,self.image)['status'],'warning')
+    def test_advisory_preserves_findings_and_marks_warning(self):
+        for severity in ('HIGH','CRITICAL','UNKNOWN','unrecognized'):
+            with self.subTest(severity=severity):
+                self.report['Results'][0]['Vulnerabilities']=[{'VulnerabilityID':'CVE-test','PkgName':'fixture','InstalledVersion':'1.0','Severity':severity}]
+                result=scan.evaluate(self.report,self.db,self.now,self.image,'advisory')
+                self.assertEqual(result['status'],'warning')
+                self.assertEqual(result['policy'],'advisory')
+                self.assertEqual(result['findings'][0]['VulnerabilityID'],'CVE-test')
+                self.assertEqual(result['counts']['UNKNOWN' if severity=='unrecognized' else severity],1)
+    def test_advisory_still_rejects_unknown_scan_or_policy(self):
+        with self.assertRaises(ValueError):
+            scan.evaluate(self.report,{'UpdatedAt':'2026-09-01T00:00:00Z'},self.now,self.image,'advisory')
+        with self.assertRaises(ValueError):
+            scan.evaluate(self.report,self.db,self.now,'sha256:'+'b'*64,'advisory')
+        with self.assertRaises(ValueError):
+            scan.evaluate({'SchemaVersion':1},self.db,self.now,self.image,'advisory')
+        with self.assertRaises(ValueError):
+            scan.evaluate(self.report,self.db,self.now,self.image,'unknown')
 if __name__=='__main__':unittest.main()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed Trivy wrapper. No AI, secrets scan, advisory waiver or silent skip."""
+"""Fail-closed Trivy wrapper with explicit vulnerability advisory mode."""
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -15,7 +15,7 @@ import re
 import subprocess
 
 
-def evaluate(report, metadata, observed, expected):
+def evaluate(report, metadata, observed, expected, policy='advisory'):
     if not isinstance(report, dict) or report.get('SchemaVersion') != 2:
         raise ValueError('SCAN_SCHEMA_UNKNOWN')
     if not re.fullmatch(r'(?:[a-z0-9][a-z0-9._/:-]*@)?sha256:[a-f0-9]{64}', expected):
@@ -24,12 +24,14 @@ def evaluate(report, metadata, observed, expected):
     identities = {image_metadata.get('ImageID'), *image_metadata.get('RepoDigests', [])}
     if expected not in identities:
         raise ValueError('SCAN_IMAGE_MISMATCH')
-    status = summarize(report, metadata, observed)
+    status = summarize(report, metadata, observed, policy)
     status['image'] = expected
     return status
 
 
-def summarize(report, metadata, observed):
+def summarize(report, metadata, observed, policy='advisory'):
+    if policy not in ('strict', 'advisory'):
+        raise ValueError('VULNERABILITY_POLICY_UNKNOWN')
     updated = datetime.fromisoformat(metadata['UpdatedAt'].replace('Z', '+00:00'))
     if updated.tzinfo is None or not timedelta(0) <= observed - updated <= timedelta(hours=24):
         raise ValueError('VULNERABILITY_DATABASE_STALE')
@@ -43,12 +45,16 @@ def summarize(report, metadata, observed):
             findings.append({key: str(vulnerability.get(key, ''))[:500] for key in
                              ('VulnerabilityID', 'PkgName', 'InstalledVersion', 'FixedVersion', 'Severity')})
             counts[vulnerability.get('Severity', 'UNKNOWN') if vulnerability.get('Severity') in counts else 'UNKNOWN'] += 1
-    return {'schema_version': 1, 'observed_at': observed.isoformat(),
-            'database_updated_at': updated.isoformat(), 'counts': counts, 'findings': findings,
-            'status': 'blocked' if counts['CRITICAL'] or counts['HIGH'] or counts['UNKNOWN'] else 'passed',
-            'packages': sum(len(r.get('Packages') or []) for r in results),
-            'official_advisories_checked': False,
-            'boundary': 'Image vulnerability scan only; upstream advisories, other build stages and rollout require separate evidence.'}
+    blocked = bool(counts['CRITICAL'] or counts['HIGH'] or counts['UNKNOWN'])
+    result = {'schema_version': 1, 'observed_at': observed.isoformat(),
+             'database_updated_at': updated.isoformat(), 'counts': counts, 'findings': findings,
+             'status': ('warning' if policy == 'advisory' else 'blocked') if blocked else 'passed',
+             'packages': sum(len(r.get('Packages') or []) for r in results),
+             'official_advisories_checked': False,
+             'boundary': 'Image vulnerability scan only; upstream advisories, other build stages and rollout require separate evidence.'}
+    if policy == 'advisory':
+        result['policy'] = 'advisory'
+    return result
 
 
 # Source-lock scanning is deliberately restricted to the two qualified ecosystems.
@@ -125,7 +131,7 @@ def sbom_components(sbom):
     return expected, optional_root
 
 
-def evaluate_sbom(report, metadata, observed, sbom, digest, snapshot):
+def evaluate_sbom(report, metadata, observed, sbom, digest, snapshot, policy='advisory'):
     expected, optional_root = sbom_components(sbom)
     if (not isinstance(report, dict) or report.get('SchemaVersion') != 2 or
             report.get('Trivy', {}).get('Version') != '0.74.0' or
@@ -158,7 +164,7 @@ def evaluate_sbom(report, metadata, observed, sbom, digest, snapshot):
         raise ValueError('SBOM_PACKAGE_COVERAGE_MISMATCH')
     # Reuse the existing DB freshness/severity gate without presenting a fake
     # image identity to the caller: only the common findings are retained.
-    status = summarize(report, metadata, observed)
+    status = summarize(report, metadata, observed, policy)
     status.update({'subject': 'source_sbom', 'sbom_sha256': digest,
                    'components_expected': len(expected), 'components_covered': len(expected),
                    'boundary': 'Source-lock PyPI/npm packages only. No installed-runtime, native bundled library, OS or upstream advisory qualification.'})
@@ -200,6 +206,7 @@ def main():
     target.add_argument('--sbom', type=Path)
     parser.add_argument('--cache', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--vulnerability-policy', choices=('strict', 'advisory'), default='advisory')
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     args.output = args.output.resolve()
@@ -242,9 +249,9 @@ def main():
             if args.sbom:
                 if read_bounded(snapshot, SBOM_LIMIT) != raw or read_bounded(args.sbom, SBOM_LIMIT) != raw:
                     raise ValueError('SBOM_CHANGED_DURING_SCAN')
-                status = evaluate_sbom(decode(report_raw), metadata, observed, sbom, digest, snapshot)
+                status = evaluate_sbom(decode(report_raw), metadata, observed, sbom, digest, snapshot, args.vulnerability_policy)
             else:
-                status = evaluate(decode(report_raw), metadata, observed, args.image)
+                status = evaluate(decode(report_raw), metadata, observed, args.image, args.vulnerability_policy)
             status['report_sha256'] = hashlib.sha256(report_raw).hexdigest()
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
         # Never reuse a partially successful verdict after any post-scan error.
@@ -252,7 +259,9 @@ def main():
         status['reason'] = 'SCANNER_OR_COVERAGE_UNAVAILABLE'
     (args.output / 'security.json').write_text(json.dumps(status, indent=2) + '\n')
     print(json.dumps(status))
-    return 0 if status['status'] == 'passed' else 1
+    if status['status'] == 'warning':
+        print('::warning title=Vulnerability findings accepted by advisory policy::Inspect security.json for complete findings')
+    return 0 if status['status'] in ('passed', 'warning') else 1
 
 
 if __name__ == '__main__':

@@ -12,6 +12,10 @@ inputs:
   output:
     description: Runner-local evidence directory
     required: true
+  vulnerability_policy:
+    description: advisory (default) or strict; advisory reports findings as warnings but still rejects scan errors
+    required: false
+    default: advisory
 runs:
   using: composite
   steps:
@@ -44,8 +48,11 @@ runs:
         SCAN_SBOM: ${{ inputs.sbom }}
         SCAN_OUTPUT: ${{ inputs.output }}
         SCAN_ACTION_PATH: ${{ github.action_path }}
+        VULNERABILITY_POLICY: ${{ inputs.vulnerability_policy }}
       run: |
+        case "$VULNERABILITY_POLICY" in strict|advisory) ;; *) echo 'VULNERABILITY_POLICY_UNKNOWN' >&2; exit 1 ;; esac
         target=(--image "$SCAN_IMAGE")
         if test -n "$SCAN_SBOM"; then target=(--sbom "$SCAN_SBOM"); fi
         python3 "$SCAN_ACTION_PATH/scan.py" --trivy "$CLOUDBOX_TRIVY" \
-          "${target[@]}" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT"
+          "${target[@]}" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT" \
+          --vulnerability-policy "$VULNERABILITY_POLICY"

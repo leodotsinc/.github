@@ -73,3 +73,32 @@ Trivy itself, and does not replace official advisory review or a runtime scan.
 These limits matter because [Trivy documents reduced accuracy for third-party
 SBOMs](https://trivy.dev/docs/latest/target/sbom/). PURL mapping is checked against
 [the pinned decoder](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/purl/purl.go).
+
+### Explicit vulnerability advisory mode
+
+The new scanner defaults to `vulnerability_policy: advisory`. HIGH, CRITICAL
+or UNKNOWN findings keep the same severity counts, findings, subject identity,
+and raw report hash. Findings
+then return `status: warning`, `policy: advisory`, a GitHub Actions warning,
+and a successful process exit. A clean scan still returns `passed` with the
+advisory policy identified. A caller that requires vulnerability gating must
+explicitly set `vulnerability_policy: strict`; these findings then return
+`blocked` and fail the action. Consumers must accept the distinct warning
+receipt; they must not rewrite it as a vulnerability-free pass.
+
+Both modes fail closed on scanner execution errors, stale or missing database,
+malformed or incomplete reports, missing package coverage, identity mismatch,
+and other validation errors. Existing SHA-pinned callers retain their previous
+behavior until they update their pin. The shared maintenance contracts job
+explicitly selects advisory for its own source-lock scan. Each application must
+review its local receipt validators when adopting the new scanner; updating a
+pin alone may be insufficient. Pluggy owns its risk decision and pins its
+adopted scanner commit.
+
+The central repository's npm audit uses advisory reporting under the owner's
+2026-10-05 approval. `tools/npm_audit_policy.py` retains the complete npm JSON
+and writes a separate warning summary. It accepts npm's finding exit only when
+the versioned report, package coverage, severity counts and exit status agree.
+Network/tool failures, malformed JSON, missing coverage and inconsistent
+evidence still fail. The source SBOM Trivy step also selects advisory under the
+same approval; its raw report, coverage and warning status remain in artifacts.
