@@ -57,11 +57,17 @@ class ToolchainTests(unittest.TestCase):
         self.assertGreater(len(inventory.locked_components(manifest, lock)), 500)
         workflow = (root / '.github/workflows/maintenance-check.yml').read_text()
         for expected in ('npm ci --ignore-scripts', 'npm sbom --package-lock-only', 'deny-network.cjs',
-                         'npm audit --package-lock-only --audit-level=high', 'retention-days: 7',
+                         'python3 tools/npm_audit_policy.py --output maintenance-tool-evidence', 'retention-days: 7',
                          'timeout-minutes: 10', 'contents: read', 'env -i PATH=', 'process.versions.node', '$(npm --version)'):
             self.assertIn(expected, workflow)
         self.assertNotIn('contents: write', workflow)
         self.assertNotIn('npx ', workflow)
+        self.assertNotIn('continue-on-error', workflow)
+        self.assertIn('vulnerability_policy: advisory', workflow)
+        self.assertIn('maintenance-tool-evidence/npm-audit-summary.json', workflow)
+        audit = (root / 'tools/npm_audit_policy.py').read_text()
+        for argument in ("'npm', 'audit'", "'--package-lock-only'", "'--audit-level=high'", "'--json'", "'--registry=https://registry.npmjs.org'"):
+            self.assertIn(argument, audit)
         self.assertIn('npm', json.loads((root / 'renovate.json').read_text())['enabledManagers'])
 
 
