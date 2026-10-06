@@ -439,5 +439,5 @@ class WorkflowArtifactTests(unittest.TestCase):
             with self.subTest(app=app,artifact=artifact,file=file):
                 result=send.subprocess.run(['/bin/bash','-c',script],env={'APP_ID':app,'ARTIFACT_NAME':artifact,'ARTIFACT_FILE':file},capture_output=True)
                 self.assertEqual(result.returncode==0,valid)
-        self.assertIn('actions/cloudbox-deploy@76a15c62a4f019febef9fcee811e6dca6ac7d9a6',workflow)
+        self.assertIn('actions/cloudbox-deploy@2a40fcc887f8472d08054f1ae2b13b807d00e88a',workflow)
         self.assertNotIn('github-token:',workflow.split('      - name: Download same-run maintenance context')[1].split('      - name:',1)[0])
