@@ -107,7 +107,8 @@ def load_maintenance(path, app, release):
         require(sha(value["control_sha256"], 64))
     require(not contains_secret_field(value))
     require(type(value["schema_version"]) is int and value["schema_version"] == 1
-            and value["app"] == app and value["mode"] == "monthly")
+            and value["app"] == app and (value["mode"] == "monthly" or
+                app == "pluggy-mcp" and value["mode"] == "qualification_pilot"))
     for key in ("request_id", "policy_sha256", "baseline_receipt_sha256", "delta_sha256"):
         require(sha(value[key], 64))
     for key in ("head_sha", "merged_sha", "tree_sha", "producer_commit"):
@@ -115,6 +116,8 @@ def load_maintenance(path, app, release):
     source = value["source_pr"]
     require(isinstance(source, dict) and set(source) == {"number", "base_sha", "head_sha", "tree_sha"})
     require(type(source["number"]) is int and 0 < source["number"] <= 2**53 - 1)
+    if value["mode"] == "qualification_pilot":
+        require(source["number"] == 11)
     require(source["base_sha"] == value["producer_commit"] and source["head_sha"] == value["head_sha"]
             and source["tree_sha"] == value["tree_sha"])
     base = value["base_manifest"]
@@ -137,6 +140,11 @@ def load_maintenance(path, app, release):
     require(isinstance(window, dict) and set(window) == {"start", "end", "timezone"}
             and window["timezone"] == "America/Sao_Paulo")
     require(timestamp(window["start"]) < timestamp(value["expires_at"]) <= timestamp(window["end"]))
+    if value["mode"] == "qualification_pilot":
+        start, end = timestamp(window["start"]), timestamp(window["end"])
+        require(any(timestamp(a) <= start < end <= timestamp(b) for a, b in (
+            ("2026-10-05T21:00:00Z", "2026-10-06T03:00:00Z"),
+            ("2026-10-06T03:00:00Z", "2026-10-07T03:00:00Z"))))
     return value
 
 
