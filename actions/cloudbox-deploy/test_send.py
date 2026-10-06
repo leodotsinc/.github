@@ -217,6 +217,43 @@ class MaintenanceTransportTests(TransportTests):
         run = self.execute(self.success)
         self.assertNotIn('maintenance', json.loads(run.call_args.kwargs['input'].split(b'\n')[1]))
 
+    def test_pluggy_pr11_pilot_context_reaches_stdin_without_authorizing_host(self):
+        self.context['mode'] = 'qualification_pilot'
+        self.context['source_pr']['number'] = 11
+        self.context['window'] = {'start': '2026-10-06T12:08:00Z',
+            'end': '2026-10-07T03:00:00Z', 'timezone': 'America/Sao_Paulo'}
+        self.context['expires_at'] = '2026-10-06T16:03:13.713033+00:00'
+        self.context_file.write_text(json.dumps(self.context))
+        self.env['CLOUDBOX_MAINTENANCE_FILE'] = str(self.context_file)
+        run = self.execute(self.success)
+        envelope = json.loads(run.call_args.kwargs['input'].split(b'\n', 2)[1])
+        self.assertEqual(envelope['maintenance'], self.context)
+        self.assertNotIn('authorization', envelope)
+
+    def test_pilot_rejects_other_pr_app_and_unapproved_or_bridged_window(self):
+        self.context['mode'] = 'qualification_pilot'
+        self.context['source_pr']['number'] = 11
+        self.context['window'] = {'start': '2026-10-06T12:08:00Z',
+            'end': '2026-10-07T03:00:00Z', 'timezone': 'America/Sao_Paulo'}
+        self.context['expires_at'] = '2026-10-06T16:03:13.713033+00:00'
+        changes = [
+            ('source_pr', dict(self.context['source_pr'], number=12)),
+            ('window', dict(self.context['window'], start='2026-10-05T21:00:00Z')),
+            ('window', dict(self.context['window'], end='2026-10-08T03:00:00Z')),
+            ('mode', 'qualification_recovery'),
+        ]
+        for key, value in changes:
+            with self.subTest(field=key):
+                item = copy.deepcopy(self.context); item[key] = value
+                self.context_file.write_text(json.dumps(item))
+                with self.assertRaises(ValueError):
+                    send.load_maintenance(self.context_file, 'pluggy-mcp', self.manifest)
+        item = copy.deepcopy(self.context)
+        item.update(app='blog', control_sha256='1'*64)
+        self.context_file.write_text(json.dumps(item))
+        with self.assertRaises(ValueError):
+            send.load_maintenance(self.context_file, 'blog', dict(self.manifest, service='blog'))
+
     def test_refuses_unknown_fields_cross_identity_urgency_and_malformed_inputs_before_ssh(self):
         changes = [
             ('app', 'blog'), ('mode', 'urgent'), ('schema_version', True),

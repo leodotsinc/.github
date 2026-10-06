@@ -52,3 +52,11 @@ locks, backups and release evidence. A structurally valid new app is not thereby
 registered or qualified on the host. Blog/Pluggy keep their existing distinct
 context schemas; the ordinary path without a context is unchanged. Native HQ
 still uses its existing separate transport and result adapter.
+
+Pluggy PR11 also accepts the closed `qualification_pilot` context within either
+documented October 5/6 qualification interval. It keeps every source, baseline,
+release and secret-field check. This only transports the existing identity
+envelope: the protected host must independently authenticate its root-owned
+owner permit, actual-clock expiry, exact source and all deployment gates.
+The pilot mode does not apply to Blog or generic apps and does not enable
+monthly maintenance, retry a failed run or grant another pilot budget.
