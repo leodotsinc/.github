@@ -54,7 +54,7 @@ exists. The shared validator does this with `toolchain_inventory.py`; infra's
 Python producer independently checks both qualified wheel resolutions.
 
 The same checksum-pinned Trivy 0.74.0 and database freshness limit of 24 hours
-apply. The SBOM is copied into a private temporary snapshot, hashed, and checked
+apply (see the opt-in stale window below). The SBOM is copied into a private temporary snapshot, hashed, and checked
 again after scanning. Each expected normalized PURL/name/version must appear in
 the proper Trivy ecosystem result, including development/transitive packages.
 Missing or unknown coverage, input drift, unavailable scanner/database and
@@ -73,6 +73,27 @@ Trivy itself, and does not replace official advisory review or a runtime scan.
 These limits matter because [Trivy documents reduced accuracy for third-party
 SBOMs](https://trivy.dev/docs/latest/target/sbom/). PURL mapping is checked against
 [the pinned decoder](https://github.com/aquasecurity/trivy/blob/v0.74.0/pkg/purl/purl.go).
+
+### Opt-in stale database window
+
+By default the database must be at most 24 hours old (`DATABASE_FRESH_HOURS`)
+and anything older fails closed, exactly as before. A caller may set
+`stale_db_warn_hours` to an integer from 24 to 168 (`STALE_DB_WARN_MAX_HOURS`).
+A database older than 24 hours but within that limit is then accepted: the scan
+runs and findings are judged by the selected `vulnerability_policy` exactly as
+with a fresh database, while a GitHub Actions warning and a step summary note
+report the stale age. The receipt of an opted-in caller adds
+`database_stale_warn_hours`, `database_stale` and `database_age_hours`; default
+receipts are unchanged. A database older than the limit, missing or unparseable
+metadata, naive or future timestamps, an invalid limit, or an unwritable step
+summary still fail closed with `SCANNER_OR_COVERAGE_UNAVAILABLE`.
+
+Only `cloudbox-infra`'s own source check and this repository's own maintenance
+check use this window (72 hours), under the owner's 2026-10-08 approval prompted
+by the stalled upstream database
+([aquasecurity/trivy-db#698](https://github.com/aquasecurity/trivy-db/issues/698)).
+All other callers keep the strict limit; existing SHA-pinned callers are
+unaffected until they update.
 
 ### Explicit vulnerability advisory mode
 
