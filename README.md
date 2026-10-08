@@ -88,11 +88,12 @@ receipts are unchanged. A database older than the limit, missing or unparseable
 metadata, naive or future timestamps, an invalid limit, or an unwritable step
 summary still fail closed with `SCANNER_OR_COVERAGE_UNAVAILABLE`.
 
-Only `cloudbox-infra`'s own source check uses this window (72 hours), under the
-owner's 2026-10-08 approval prompted by the stalled upstream database
+Only `cloudbox-infra`'s own source check and this repository's own maintenance
+check use this window (72 hours), under the owner's 2026-10-08 approval prompted
+by the stalled upstream database
 ([aquasecurity/trivy-db#698](https://github.com/aquasecurity/trivy-db/issues/698)).
-Other callers, including this repository's own maintenance check, keep the
-strict limit; existing SHA-pinned callers are unaffected until they update.
+All other callers keep the strict limit; existing SHA-pinned callers are
+unaffected until they update.
 
 ### Explicit vulnerability advisory mode
 
