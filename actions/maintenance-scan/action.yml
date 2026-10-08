@@ -1,5 +1,5 @@
 name: Qualified image or source SBOM security scan
-description: Scan one immutable image or bounded source SBOM with a pinned Trivy and fresh database; fail closed without any model calls.
+description: Scan one immutable image or bounded source SBOM with a pinned Trivy and fresh database (optional bounded stale window); fail closed without any model calls.
 inputs:
   image:
     description: Immutable digest reference or local image ID
@@ -16,6 +16,10 @@ inputs:
     description: advisory (default) or strict; advisory reports findings as warnings but still rejects scan errors
     required: false
     default: advisory
+  stale_db_warn_hours:
+    description: Opt-in only. Empty keeps the strict 24-hour database freshness limit. An integer from 24 to 168 accepts an older database up to that age with a warning; findings, coverage and every other check are unchanged
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -49,10 +53,13 @@ runs:
         SCAN_OUTPUT: ${{ inputs.output }}
         SCAN_ACTION_PATH: ${{ github.action_path }}
         VULNERABILITY_POLICY: ${{ inputs.vulnerability_policy }}
+        STALE_DB_WARN_HOURS: ${{ inputs.stale_db_warn_hours }}
       run: |
         case "$VULNERABILITY_POLICY" in strict|advisory) ;; *) echo 'VULNERABILITY_POLICY_UNKNOWN' >&2; exit 1 ;; esac
         target=(--image "$SCAN_IMAGE")
         if test -n "$SCAN_SBOM"; then target=(--sbom "$SCAN_SBOM"); fi
+        freshness=()
+        if test -n "$STALE_DB_WARN_HOURS"; then freshness=("--stale-db-warn-hours=$STALE_DB_WARN_HOURS"); fi
         python3 "$SCAN_ACTION_PATH/scan.py" --trivy "$CLOUDBOX_TRIVY" \
           "${target[@]}" --cache "$RUNNER_TEMP/cloudbox-trivy-cache" --output "$SCAN_OUTPUT" \
-          --vulnerability-policy "$VULNERABILITY_POLICY"
+          --vulnerability-policy "$VULNERABILITY_POLICY" "${freshness[@]}"
