@@ -63,5 +63,13 @@
       "minimumReleaseAge": null,
       "automerge": false
     }
-  ]
+  ],
+  "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "automerge": true,
+    "draftPR": false,
+    "minimumReleaseAge": null,
+    "schedule": ["at any time"],
+    "labels": ["security"]
+  }
 }
