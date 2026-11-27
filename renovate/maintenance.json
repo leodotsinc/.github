@@ -70,6 +70,9 @@
     "draftPR": false,
     "minimumReleaseAge": null,
     "schedule": ["at any time"],
-    "labels": ["security"]
+    "labels": ["security"],
+    "prConcurrentLimit": 0,
+    "prHourlyLimit": 0,
+    "branchConcurrentLimit": 0
   }
 }
